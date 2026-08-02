@@ -9,6 +9,11 @@ import type { CWLRound, CWLWarMember } from '@/types/database';
  *
  * A "missed attack" only counts once its round has ENDED (state === 'warEnded') with no attack used;
  * a member sitting in a preparation/inWar round hasn't missed yet.
+ *
+ * `roundsPlayed` follows the same discipline: a round counts only once it has reached BATTLE DAY.
+ * The lineup is published at the start of prep day, so counting appearances alone credited everyone
+ * with a round they had not yet played — on prep day the column filled with 1s, 2s and 3s before a
+ * single attack existed. Being picked is not the same as playing.
  */
 
 export interface MemberPerf {
@@ -16,7 +21,8 @@ export interface MemberPerf {
   personId: string | null;
   playerTag: string | null;
   name: string;
-  roundsPlayed: number;    // distinct rounds the member appeared in a lineup
+  thLevel: number | null;  // highest TH seen for the member across the season's lineups
+  roundsPlayed: number;    // distinct rounds reaching battle day that the member was fielded in
   attacksUsed: number;
   totalStars: number;
   avgDestruction: number | null; // mean destruction over attacks used, null if none
@@ -32,13 +38,15 @@ const TOTALS_NAME = 'All members';
 
 function emptyTotals(): MemberPerf {
   return {
-    key: '__totals__', personId: null, playerTag: null, name: TOTALS_NAME,
+    key: '__totals__', personId: null, playerTag: null, name: TOTALS_NAME, thLevel: null,
     roundsPlayed: 0, attacksUsed: 0, totalStars: 0, avgDestruction: null, missed: 0,
   };
 }
 
 export function computeSeasonPerformance(rounds: CWLRound[], members: CWLWarMember[]): SeasonPerformance {
   const endedRoundIds = new Set(rounds.filter((r) => r.state === 'warEnded').map((r) => r.id));
+  // Prep day is not a played round — see the header note.
+  const playedRoundIds = new Set(rounds.filter((r) => r.state === 'inWar' || r.state === 'warEnded').map((r) => r.id));
 
   // Accumulate per member, keyed by person (linked) or tag (unlinked/guest).
   type Acc = MemberPerf & { destructionSum: number; roundIds: Set<string> };
@@ -48,7 +56,7 @@ export function computeSeasonPerformance(rounds: CWLRound[], members: CWLWarMemb
     let acc = byKey.get(key);
     if (!acc) {
       acc = {
-        key, personId: null, playerTag: null, name: key,
+        key, personId: null, playerTag: null, name: key, thLevel: null,
         roundsPlayed: 0, attacksUsed: 0, totalStars: 0, avgDestruction: null, missed: 0,
         destructionSum: 0, roundIds: new Set(),
       };
@@ -61,7 +69,10 @@ export function computeSeasonPerformance(rounds: CWLRound[], members: CWLWarMemb
   for (const m of members) {
     const key = m.person_id ?? m.player_tag;
     const acc = ensure(key, { personId: m.person_id, playerTag: m.player_tag, name: m.name || m.player_tag });
-    acc.roundIds.add(m.round_id);
+    // A member can upgrade mid-season and alts group under one person key, so keep the highest TH —
+    // it is what a leader sorts by when reading the table as "how did our big accounts do".
+    if (m.th_level !== null && m.th_level > (acc.thLevel ?? 0)) acc.thLevel = m.th_level;
+    if (playedRoundIds.has(m.round_id)) acc.roundIds.add(m.round_id);
     acc.attacksUsed += m.attacks_used;
     acc.totalStars += m.stars;
     if (m.attacks_used > 0) acc.destructionSum += m.destruction;
@@ -73,6 +84,7 @@ export function computeSeasonPerformance(rounds: CWLRound[], members: CWLWarMemb
     personId: acc.personId,
     playerTag: acc.playerTag,
     name: acc.name,
+    thLevel: acc.thLevel,
     roundsPlayed: acc.roundIds.size,
     attacksUsed: acc.attacksUsed,
     totalStars: acc.totalStars,

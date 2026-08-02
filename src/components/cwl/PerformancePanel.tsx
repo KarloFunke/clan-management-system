@@ -5,13 +5,14 @@ import { BarChart3 } from 'lucide-react';
 import { useCWLStore } from '@/lib/stores/cwlStore';
 import { computeSeasonPerformance, type MemberPerf } from '@/lib/cwl/performance';
 
-type SortKey = 'totalStars' | 'attacksUsed' | 'avgDestruction' | 'missed' | 'name';
+type SortKey = 'totalStars' | 'attacksUsed' | 'avgDestruction' | 'missed' | 'thLevel' | 'name';
 
 const SORTS: { key: SortKey; label: string }[] = [
   { key: 'totalStars', label: 'Total stars' },
   { key: 'attacksUsed', label: 'Attacks used' },
   { key: 'avgDestruction', label: 'Avg destruction' },
   { key: 'missed', label: 'Missed attacks' },
+  { key: 'thLevel', label: 'Town Hall' },
   { key: 'name', label: 'Name' },
 ];
 
@@ -33,6 +34,8 @@ export default function PerformancePanel() {
       if (sort === 'name') return a.name.localeCompare(b.name);
       const av = (a[sort] as number | null) ?? -1;
       const bv = (b[sort] as number | null) ?? -1;
+      // Within a TH bracket the useful secondary read is still effort, not name order.
+      if (sort === 'thLevel' && av === bv) return b.totalStars - a.totalStars;
       return bv - av;
     });
     return rows;
@@ -50,6 +53,7 @@ export default function PerformancePanel() {
   const cell = (m: MemberPerf) => (
     <tr key={m.key} style={{ borderTop: '1px solid rgba(255,255,255,0.04)' }}>
       <td style={{ ...td, textAlign: 'left', fontWeight: 500 }}>{m.name}</td>
+      <td style={td}>{m.thLevel ?? '—'}</td>
       <td style={td}>{m.roundsPlayed}</td>
       <td style={td}>{m.attacksUsed}</td>
       <td style={td}>{m.totalStars}</td>
@@ -78,6 +82,7 @@ export default function PerformancePanel() {
           <thead>
             <tr>
               <th style={{ ...th, textAlign: 'left' }}>Member</th>
+              <th style={th}>TH</th>
               <th style={th}>Rounds</th>
               <th style={th}>Attacks</th>
               <th style={th}>Stars</th>
@@ -89,6 +94,7 @@ export default function PerformancePanel() {
             {sorted.map(cell)}
             <tr style={{ borderTop: '2px solid rgba(255,255,255,0.1)' }}>
               <td style={{ ...td, textAlign: 'left', fontWeight: 700 }}>{totals.name}</td>
+              <td style={td} />
               <td style={{ ...td, fontWeight: 700 }}>{totals.roundsPlayed}</td>
               <td style={{ ...td, fontWeight: 700 }}>{totals.attacksUsed}</td>
               <td style={{ ...td, fontWeight: 700 }}>{totals.totalStars}</td>

@@ -3,6 +3,8 @@ import { pollLeagueState, type TaggedLeagueWar } from './api';
 import { UNREVEALED_WAR_TAG, type CoCLeagueWarClan } from '@/lib/coc-api';
 import { buildLineup, persistWarAttacks } from '@/lib/warAttacks';
 import { notifyLineupIfRevealed } from './lineupNotify';
+import { reconcileSeasonSignups } from './signupSync';
+import type { ClanSignup } from './signupReconcile';
 
 /**
  * Phase 2 live-state ingestion. Polls every participating family clan's current CWL league group
@@ -14,8 +16,18 @@ import { notifyLineupIfRevealed } from './lineupNotify';
  * per-clan isolation of src/lib/sync.ts. Polling off-season is a no-op (pollLeagueState -> null).
  */
 
-// CWL is only live once a season is signed up / in progress. Other statuses have no league group.
-const LIVE_STATUSES = ['signed_up', 'in_progress'];
+/**
+ * Which seasons to poll. Everything except a finished one: the season's status is a LEADER'S marker
+ * of where the planning work has got to, and it lags reality — CWL starting in-game does not wait
+ * for anyone to tick a dropdown. Gating polling on 'signed_up' meant a season left in 'planning'
+ * (the normal state on prep day, since the leader has no reason to advance it until asked) showed an
+ * empty live tracker all week. Polling an off-season clan is already a no-op, so the cost of the
+ * wider net is nothing.
+ */
+const POLLABLE_STATUSES = ['planning', 'transfers_pending', 'signed_up', 'in_progress'];
+
+/** Statuses that a live league group should push the season forward FROM (never backwards). */
+const PRE_LIVE_STATUSES = ['planning', 'transfers_pending', 'signed_up'];
 
 type SeasonClanRow = { clan_id: string; clan: { id: string; clan_tag: string } | null };
 
@@ -36,10 +48,16 @@ function ourSide(war: TaggedLeagueWar, clanTag: string): { us: CoCLeagueWarClan;
   return null;
 }
 
-/** Ingest one family clan's league state into cwl_rounds + cwl_war_members. Returns rounds upserted. */
-async function ingestClan(seasonId: string, clanId: string, clanTag: string): Promise<number> {
+/** What one clan's poll produced: its rounds, plus the in-game signup list to reconcile against. */
+interface ClanIngest {
+  upserted: number;
+  signup: ClanSignup | null;
+}
+
+/** Ingest one family clan's league state into cwl_rounds + cwl_war_members. */
+async function ingestClan(seasonId: string, clanId: string, clanTag: string): Promise<ClanIngest> {
   const snap = await pollLeagueState(clanTag);
-  if (!snap) return 0; // off-season for this clan
+  if (!snap) return { upserted: 0, signup: null }; // off-season for this clan
 
   const warByTag = new Map(snap.wars.map((w) => [w.warTag, w] as const));
   let upserted = 0;
@@ -144,19 +162,35 @@ async function ingestClan(seasonId: string, clanId: string, clanTag: string): Pr
     });
   }
 
-  return upserted;
+  // `group.clans[].members` is the clan's authoritative CWL signup list — who leadership actually
+  // signed in, available from prep day regardless of which round has been revealed. It is the input
+  // the roster board is reconciled against (see signupReconcile.ts).
+  const ourGroupClan = snap.group.clans.find((c) => c.tag === clanTag);
+  const signup: ClanSignup | null = ourGroupClan
+    ? {
+        clanId,
+        members: ourGroupClan.members.map((m) => ({
+          playerTag: m.tag,
+          name: m.name,
+          thLevel: m.townHallLevel ?? null,
+        })),
+        lineupRevealed: upserted > 0,
+      }
+    : null;
+
+  return { upserted, signup };
 }
 
 export async function syncCwlLiveState(): Promise<{ seasonsPolled: number; roundsUpserted: number }> {
   const { data: seasons } = await supabase
     .from('cwl_seasons')
-    .select('id')
-    .in('status', LIVE_STATUSES);
+    .select('id, status')
+    .in('status', POLLABLE_STATUSES);
 
   let seasonsPolled = 0;
   let roundsUpserted = 0;
 
-  for (const season of (seasons as { id: string }[] | null) || []) {
+  for (const season of (seasons as { id: string; status: string }[] | null) || []) {
     try {
       const { data: sc } = await supabase
         .from('cwl_season_clans')
@@ -164,20 +198,41 @@ export async function syncCwlLiveState(): Promise<{ seasonsPolled: number; round
         .eq('season_id', season.id);
 
       let anyPolled = false;
+      let seasonRounds = 0;
+      const signups: ClanSignup[] = [];
       for (const row of (sc as unknown as SeasonClanRow[]) || []) {
         const tag = row.clan?.clan_tag;
         if (!tag) continue;
         try {
-          roundsUpserted += await ingestClan(season.id, row.clan_id, tag);
+          const { upserted, signup } = await ingestClan(season.id, row.clan_id, tag);
+          seasonRounds += upserted;
+          roundsUpserted += upserted;
+          if (signup) signups.push(signup);
           anyPolled = true;
         } catch (err) {
           console.error(`CWL live ingest failed for clan ${tag}:`, err);
         }
       }
 
+      // Reconcile ONCE per season, after every clan is polled — an account that moved between two
+      // family clans is only judged correctly when both signup lists are in hand, exactly as
+      // detectCompletedTransfers waits for the whole roster pass.
+      if (signups.length) {
+        try {
+          await reconcileSeasonSignups(season.id, signups);
+        } catch (err) {
+          console.error(`CWL signup reconcile failed for season ${season.id}:`, err);
+        }
+      }
+
       if (anyPolled) {
         seasonsPolled++;
-        await supabase.from('cwl_seasons').update({ last_polled_at: new Date().toISOString() }).eq('id', season.id);
+        const update: Record<string, string> = { last_polled_at: new Date().toISOString() };
+        // A revealed round is CWL having actually started. The status dropdown is a leader's planning
+        // marker and routinely lags that, so the game moves it forward — never backwards, and never
+        // out of 'completed'.
+        if (seasonRounds > 0 && PRE_LIVE_STATUSES.includes(season.status)) update.status = 'in_progress';
+        await supabase.from('cwl_seasons').update(update).eq('id', season.id);
       }
     } catch (err) {
       console.error(`CWL live sync failed for season ${season.id}:`, err);

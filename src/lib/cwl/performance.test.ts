@@ -68,6 +68,27 @@ describe('computeSeasonPerformance', () => {
     expect(totals.avgDestruction).toBeCloseTo(100);
   });
 
+  it('does not count a preparation round as played — being picked is not playing', () => {
+    const rounds = [round('prep', 'preparation'), round('live', 'inWar')];
+    const members = [
+      member('prep', { person_id: 'p3', player_tag: '#C', name: 'Cal', attacks_used: 0 }),
+      member('live', { person_id: 'p3', player_tag: '#C', name: 'Cal', attacks_used: 1, stars: 2, destruction: 70 }),
+    ];
+    const { perMember, totals } = computeSeasonPerformance(rounds, members);
+    expect(perMember[0].roundsPlayed).toBe(1);
+    expect(totals.roundsPlayed).toBe(1);
+  });
+
+  it('carries the highest TH seen for a member, for the TH sort', () => {
+    const rounds = [round('r1', 'warEnded'), round('r2', 'warEnded')];
+    const members = [
+      member('r1', { person_id: 'p1', player_tag: '#A', th_level: 15 }),
+      member('r2', { person_id: 'p1', player_tag: '#A', th_level: 16 }),
+    ];
+    const { perMember } = computeSeasonPerformance(rounds, members);
+    expect(perMember[0].thLevel).toBe(16);
+  });
+
   it('sorts members by total stars descending', () => {
     const rounds = [round('r1', 'warEnded')];
     const members = [
