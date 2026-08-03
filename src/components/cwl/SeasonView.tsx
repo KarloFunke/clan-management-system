@@ -16,6 +16,7 @@ import PerformancePanel from './PerformancePanel';
 import RosterPostModal from './RosterPostModal';
 import CollapsibleSection from './CollapsibleSection';
 import { useClanName } from './useClanName';
+import { useCwlScope } from './useCwlScope';
 
 const STATUS_FLOW: CWLSeasonStatus[] = ['planning', 'transfers_pending', 'signed_up', 'in_progress', 'completed'];
 const STATUS_LABEL: Record<CWLSeasonStatus, string> = {
@@ -36,6 +37,7 @@ export default function SeasonView({ season }: { season: CWLSeason }) {
   const transfers = useCWLStore((s) => s.transfers);
   const seasonClans = useCWLStore((s) => s.seasonClans);
   const clanName = useClanName();
+  const scope = useCwlScope();
 
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [posting, setPosting] = useState(false);
@@ -56,12 +58,18 @@ export default function SeasonView({ season }: { season: CWLSeason }) {
   // list (see cwl/signupReconcile.ts), so what they show is a record rather than a draft.
   const planningDone = season.status === 'signed_up' || season.status === 'in_progress' || season.status === 'completed';
 
-  const allocated = players.filter((p) => p.status !== 'removed');
+  // The collapsed summary lines have to agree with what opening the section shows, so they are
+  // scoped the same way the panels are (see useCwlScope).
+  const scopedTransfers = transfers.filter((t) => scope.includes(t.fromClanId) || scope.includes(t.toClanId));
+  const allocated = players.filter((p) => p.status !== 'removed' && scope.includes(p.recommendedClanId));
   const benched = allocated.filter((p) => p.isBench).length;
-  const openTransfers = transfers.filter((t) => t.status === 'pending').length;
+  const openTransfers = scopedTransfers.filter((t) => t.status === 'pending').length;
+  const optedOut = players.filter((p) => p.optedOut).length;
 
   const planning = (
     <>
+      {/* Fill order is inherently family-wide — a clan's priority only means anything relative to
+          the others — so this panel always shows the whole pool regardless of the clan scope. */}
       <CollapsibleSection
         title="Clan Fill Order"
         summary={`${seasonClans.length} clan${seasonClans.length === 1 ? '' : 's'}`}
@@ -72,11 +80,11 @@ export default function SeasonView({ season }: { season: CWLSeason }) {
       <CollapsibleSection
         title="Required Transfers"
         summary={
-          transfers.length === 0
+          scopedTransfers.length === 0
             ? 'none required'
             : openTransfers > 0
-              ? `${openTransfers} of ${transfers.length} outstanding`
-              : `${transfers.length} settled`
+              ? `${openTransfers} of ${scopedTransfers.length} outstanding`
+              : `${scopedTransfers.length} settled`
         }
         defaultOpen={!planningDone}
       >
@@ -84,7 +92,7 @@ export default function SeasonView({ season }: { season: CWLSeason }) {
       </CollapsibleSection>
       <CollapsibleSection
         title="Roster Allocation"
-        summary={`${allocated.length} account${allocated.length === 1 ? '' : 's'} · ${benched} benched`}
+        summary={`${allocated.length} account${allocated.length === 1 ? '' : 's'} · ${benched} benched${optedOut > 0 ? ` · ${optedOut} not playing` : ''}`}
         defaultOpen={!planningDone}
       >
         <p className="text-muted" style={{ fontSize: '0.75rem', margin: '0 0 var(--space-sm)' }}>
@@ -119,6 +127,18 @@ export default function SeasonView({ season }: { season: CWLSeason }) {
           <h2 style={{ fontSize: '1.5rem', margin: 0 }}>CWL {season.label}</h2>
           <p className="text-muted" style={{ fontSize: '0.75rem', margin: '4px 0 0' }}>
             {season.last_polled_at ? `Live data as of ${new Date(season.last_polled_at).toLocaleString()}` : 'Planning — not yet polled against live CWL'}
+          </p>
+          {/* The season spans the family but the panels below read one clan. Say which, next to the
+              title, so no number on this page is ambiguous about what it counts. */}
+          <p style={{ fontSize: '0.75rem', margin: '2px 0 0' }}>
+            {scope.isFamily ? (
+              <span className="text-muted">Showing all clans — use the clan switcher above to focus one.</span>
+            ) : (
+              <span>
+                Showing <strong>{clanName(scope.clanId)}</strong>
+                <span className="text-muted"> — switch to All Clans for the family view.</span>
+              </span>
+            )}
           </p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>

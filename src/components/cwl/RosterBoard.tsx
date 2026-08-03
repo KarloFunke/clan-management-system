@@ -1,11 +1,13 @@
 'use client';
 
 import { useState } from 'react';
-import { MoreVertical, ArrowRightLeft, Users } from 'lucide-react';
+import { MoreVertical, ArrowRightLeft, Users, Info } from 'lucide-react';
 import { useClan } from '@/lib/ClanContext';
 import { useCWLStore } from '@/lib/stores/cwlStore';
 import { tierLabel, tierOrder } from '@/lib/cwl/leagues';
+import { benchReason, groupExclusions } from '@/lib/cwl/rosterReason';
 import { useClanName } from './useClanName';
+import { useCwlScope } from './useCwlScope';
 import type { RosterPlayer, MoveAction } from './types';
 
 // Strongest-first, matching the engine's ordering, so the board reads consistently after edits.
@@ -19,9 +21,11 @@ function byStrength(a: RosterPlayer, b: RosterPlayer): number {
 function PlayerRow({
   player,
   currentClanId,
+  reason,
 }: {
   player: RosterPlayer;
   currentClanId: string | null; // the clan column this row sits in (null = unassigned)
+  reason?: string; // why this account is not in the fighting lineup, shown under the name
 }) {
   const [open, setOpen] = useState(false);
   const { clans } = useClan();
@@ -38,7 +42,8 @@ function PlayerRow({
   };
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', padding: '5px 6px', borderRadius: 'var(--radius-sm)', background: 'rgba(255,255,255,0.02)', opacity: busy ? 0.5 : 1 }}>
+    <div style={{ padding: '5px 6px', borderRadius: 'var(--radius-sm)', background: 'rgba(255,255,255,0.02)', opacity: busy ? 0.5 : 1 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
       <span
         style={{ flex: 1, fontSize: '0.82rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
         title={player.isAlt ? `${player.name} — one of ${player.personName}'s accounts` : player.name}
@@ -49,6 +54,14 @@ function PlayerRow({
           <span className="text-muted" style={{ fontSize: '0.65rem' }}> · {player.personName}</span>
         )}
       </span>
+      {player.optedOut && (
+        <span
+          title="Marked as not participating this season — the roster engine leaves this account out on every re-allocation"
+          style={{ fontSize: '0.58rem', fontWeight: 700, letterSpacing: '0.04em', color: 'var(--color-muted)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 999, padding: '1px 6px', whiteSpace: 'nowrap' }}
+        >
+          NOT PLAYING
+        </span>
+      )}
       <span className="text-muted" style={{ fontSize: '0.65rem', fontVariantNumeric: 'tabular-nums' }}>TH{player.thLevel}</span>
       <span className="text-muted" title={tierLabel(player.leagueTier)} style={{ fontSize: '0.6rem', width: 86, textAlign: 'right', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{tierLabel(player.leagueTier)}</span>
       {player.status === 'transfer_required' && (
@@ -68,11 +81,26 @@ function PlayerRow({
               {currentClanId && (player.isBench
                 ? <MenuItem label="Move to fighting" onClick={() => act('unbench')} />
                 : <MenuItem label="Send to bench" onClick={() => act('bench')} />)}
+              {/* "Remove" is a one-off edit to this roster; "not participating" is a statement about
+                  the player that the engine re-reads, so it survives a re-allocation. Both are
+                  offered because they answer different questions. */}
+              {player.optedOut
+                ? <MenuItem label="Mark as participating" onClick={() => act('opt_in')} />
+                : <MenuItem label="Mark not participating" onClick={() => act('opt_out')} />}
               {currentClanId && <MenuItem label="Remove from season" danger onClick={() => act('remove')} />}
             </div>
           </>
         )}
       </div>
+    </div>
+    {/* The answer to "why isn't this account playing", on the row itself rather than in a tooltip —
+        a leader reads this board to decide who to go and message, and a reason nobody hovers over
+        is a reason nobody acts on. */}
+    {reason && (
+      <div className="text-muted" style={{ fontSize: '0.66rem', lineHeight: 1.35, paddingLeft: 2, marginTop: 2 }}>
+        {reason}
+      </div>
+    )}
     </div>
   );
 }
@@ -97,6 +125,8 @@ function ClanColumn({
   fighting,
   bench,
   currentClanId,
+  positionOf,
+  warSize,
 }: {
   title: string;
   subtitle: string;
@@ -106,6 +136,10 @@ function ClanColumn({
   fighting: RosterPlayer[];
   bench: RosterPlayer[];
   currentClanId: string | null;
+  // 1-based strength position within the WHOLE clan roster, so a bench reason stays true even when
+  // the in-game lineup benched someone strong (see lib/cwl/rosterReason.ts).
+  positionOf?: Map<string, number>;
+  warSize?: number;
 }) {
   return (
     <div className="card" style={{ padding: 'var(--space-md)', minWidth: 260, flex: '1 1 260px' }}>
@@ -136,7 +170,18 @@ function ClanColumn({
         <>
           <div style={{ fontSize: '0.62rem', textTransform: 'uppercase', color: 'var(--color-muted)', margin: '10px 0 4px', letterSpacing: '0.05em' }}>Bench ({bench.length})</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 3, opacity: 0.75 }}>
-            {bench.map((p) => <PlayerRow key={p.allocationId} player={p} currentClanId={currentClanId} />)}
+            {bench.map((p) => (
+              <PlayerRow
+                key={p.allocationId}
+                player={p}
+                currentClanId={currentClanId}
+                reason={
+                  positionOf && warSize
+                    ? benchReason(positionOf.get(p.allocationId) ?? bench.length, warSize).text
+                    : undefined
+                }
+              />
+            ))}
           </div>
         </>
       )}
@@ -153,21 +198,61 @@ export default function RosterBoard() {
   const players = useCWLStore((s) => s.players);
   const seasonClans = useCWLStore((s) => s.seasonClans);
   const clanName = useClanName();
+  const scope = useCwlScope();
 
-  const unassigned = players.filter((p) => !p.recommendedClanId).sort(byStrength);
+  // Scoped to one clan, only that column is shown. The unassigned pile is a family-level fact —
+  // an account nobody rostered belongs to no clan — so it is kept out of the single-clan view
+  // rather than repeated under every clan as if each were responsible for it.
+  const visibleClans = seasonClans.filter((sc) => scope.includes(sc.clanId));
+  const unassigned = scope.isFamily
+    ? players.filter((p) => !p.recommendedClanId).sort(byStrength)
+    : [];
+
+  // Every excluded account carries the engine's own reason (cwl_allocations.note). Grouping them
+  // means the callout says each reason once — "Family roster full — Ann, Bob, Cat" — instead of
+  // repeating a sentence down a list of names.
+  // The callout carries these reasons, so the rows underneath deliberately do NOT repeat them —
+  // the Unassigned column would otherwise print the same sentence once per name.
+  const exclusions = groupExclusions(unassigned.map((p) => ({ name: p.name, note: p.note })));
 
   return (
+    <div>
+    {exclusions.length > 0 && (
+      <div
+        className="card"
+        style={{ padding: 'var(--space-sm) var(--space-md)', marginBottom: 'var(--space-md)', display: 'flex', gap: 'var(--space-sm)', alignItems: 'flex-start', borderLeft: '3px solid var(--color-warning)' }}
+      >
+        <Info size={15} className="text-warning" style={{ flexShrink: 0, marginTop: 2 }} />
+        <div>
+          <div style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: 2 }}>
+            {unassigned.length} account{unassigned.length === 1 ? '' : 's'} left off the proposed roster
+          </div>
+          {exclusions.map((g) => (
+            <div key={g.reason} className="text-muted" style={{ fontSize: '0.72rem', lineHeight: 1.5 }}>
+              <span style={{ color: 'var(--color-text)' }}>{g.names.join(', ')}</span> — {g.reason}
+            </div>
+          ))}
+        </div>
+      </div>
+    )}
+
     <div style={{ display: 'flex', gap: 'var(--space-md)', flexWrap: 'wrap', alignItems: 'flex-start' }}>
-      {seasonClans.map((sc, i) => {
+      {visibleClans.map((sc) => {
+        const i = seasonClans.indexOf(sc); // fill position is family-wide, not an index into the view
         const members = players.filter((p) => p.recommendedClanId === sc.clanId).sort(byStrength);
         const fighting = members.filter((p) => !p.isBench);
         const bench = members.filter((p) => p.isBench);
+        // Position is taken across the WHOLE clan roster, not within the bench list, so the reason
+        // still reads correctly when the in-game lineup has benched a strong account.
+        const positionOf = new Map(members.map((p, idx) => [p.allocationId, idx + 1]));
         return (
           <ClanColumn
             key={sc.clanId}
             title={clanName(sc.clanId)}
             priorityLabel={`#${i + 1}`}
             subtitle={`${fighting.length}/${sc.warSize}`}
+            positionOf={positionOf}
+            warSize={sc.warSize}
             overCapacity={fighting.length > sc.warSize}
             // The visible cost of the priority waterfall: a clan low in the order can be left short
             // because the clans above it filled their benches first. Flag it rather than hide it.
@@ -190,12 +275,17 @@ export default function RosterBoard() {
         />
       )}
 
-      {seasonClans.length === 0 && (
+      {visibleClans.length === 0 && (
         <div className="card" style={{ padding: 'var(--space-lg)', textAlign: 'center', flex: 1 }}>
           <Users size={22} className="text-muted" style={{ marginBottom: 'var(--space-sm)' }} />
-          <p className="text-muted" style={{ fontSize: '0.85rem', margin: 0 }}>No clans in this season&apos;s pool.</p>
+          <p className="text-muted" style={{ fontSize: '0.85rem', margin: 0 }}>
+            {seasonClans.length === 0
+              ? "No clans in this season's pool."
+              : 'This clan is not in the season pool — switch to All Clans to see the family roster.'}
+          </p>
         </div>
       )}
+    </div>
     </div>
   );
 }

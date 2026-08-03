@@ -3,6 +3,7 @@
 import { ArrowRight, ArrowRightLeft } from 'lucide-react';
 import { useCWLStore } from '@/lib/stores/cwlStore';
 import { useClanName } from './useClanName';
+import { useCwlScope } from './useCwlScope';
 
 /**
  * Required in-game transfers. The move itself is manual (in-game), but the roster sync watches every
@@ -14,10 +15,16 @@ import { useClanName } from './useClanName';
  * reloading the season, so the list no longer flashes on every checkbox.
  */
 export default function TransfersPanel() {
-  const transfers = useCWLStore((s) => s.transfers);
+  const all = useCWLStore((s) => s.transfers);
   const savingTransferId = useCWLStore((s) => s.savingTransferId);
   const toggleTransfer = useCWLStore((s) => s.toggleTransfer);
   const clanName = useClanName();
+  const scope = useCwlScope();
+
+  // A transfer touches two clans, and both leaders need to see it: the one losing the account has to
+  // let them go, the one gaining it has to have the space. So a clan-scoped view keeps a move if
+  // EITHER end is this clan, rather than only the destination.
+  const transfers = all.filter((t) => scope.includes(t.fromClanId) || scope.includes(t.toClanId));
 
   const pending = transfers.filter((t) => t.status !== 'done').length;
 
@@ -36,7 +43,11 @@ export default function TransfersPanel() {
       </p>
 
       {transfers.length === 0 ? (
-        <p className="text-muted" style={{ fontSize: '0.85rem' }}>No transfers required — every account is already in its recommended clan.</p>
+        <p className="text-muted" style={{ fontSize: '0.85rem' }}>
+          {all.length === 0
+            ? 'No transfers required — every account is already in its recommended clan.'
+            : 'No transfers in or out of this clan. Switch to All Clans for the family list.'}
+        </p>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-xs)' }}>
           {transfers.map((t) => {

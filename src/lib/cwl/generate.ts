@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import { allocate, type PoolClan } from './allocation';
-import { loadEligiblePlayers, loadWarIneligibleAccountTags } from './roster';
+import { loadEligiblePlayers, loadOptedOutAccountTags, loadWarIneligibleAccountTags } from './roster';
 import type { CWLConstraints } from '@/types/database';
 
 /**
@@ -37,11 +37,14 @@ export async function generateAllocation(seasonId: string): Promise<{ allocated:
   if (pool.length === 0) throw new Error('This season has no participating clans');
 
   const constraints = season.constraints as CWLConstraints;
-  const [players, warIneligible] = await Promise.all([
+  // Opt-outs are re-read on every run — that is the whole point of keeping them off the allocation
+  // row, which this function is about to delete.
+  const [players, warIneligible, optedOut] = await Promise.all([
     loadEligiblePlayers(),
     loadWarIneligibleAccountTags(),
+    loadOptedOutAccountTags(seasonId),
   ]);
-  const drafts = allocate(players, pool, constraints, warIneligible);
+  const drafts = allocate(players, pool, constraints, warIneligible, optedOut);
 
   // Clear the previous run. cwl_transfers cascades off cwl_allocations, so this also drops the
   // stale pending-transfer list rather than leaving moves pointing at a roster that no longer exists.

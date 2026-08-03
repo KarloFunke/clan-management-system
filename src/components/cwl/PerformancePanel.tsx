@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { BarChart3 } from 'lucide-react';
 import { useCWLStore } from '@/lib/stores/cwlStore';
 import { computeSeasonPerformance, type MemberPerf } from '@/lib/cwl/performance';
+import { useCwlScope } from './useCwlScope';
 
 type SortKey = 'totalStars' | 'attacksUsed' | 'avgDestruction' | 'missed' | 'thLevel' | 'name';
 
@@ -22,11 +23,18 @@ const dash = (n: number | null, suffix = '') => (n === null ? '—' : `${n.toFix
 
 /** Season-wide per-member CWL performance recognition (not a ranking). Reads the stored round data. */
 export default function PerformancePanel() {
-  const rounds = useCWLStore((s) => s.rounds);
+  const allRounds = useCWLStore((s) => s.rounds);
   const members = useCWLStore((s) => s.warMembers);
+  const scope = useCwlScope();
 
   const [sort, setSort] = useState<SortKey>('totalStars');
-  const { perMember, totals } = useMemo(() => computeSeasonPerformance(rounds, members), [rounds, members]);
+  // Splitting by clan is just a narrower round set: a war member row belongs to exactly one round,
+  // and a round to exactly one clan, so filtering the rounds filters the whole roll-up with it —
+  // including the totals line, which then reads as that clan's totals rather than the family's.
+  const { perMember, totals } = useMemo(() => {
+    const rounds = allRounds.filter((r) => scope.includes(r.clan_id));
+    return computeSeasonPerformance(rounds, members);
+  }, [allRounds, members, scope]);
 
   const sorted = useMemo(() => {
     const rows = perMember.slice();
@@ -45,7 +53,11 @@ export default function PerformancePanel() {
     return (
       <div className="card" style={{ padding: 'var(--space-lg)', textAlign: 'center' }}>
         <BarChart3 size={24} className="text-muted" style={{ marginBottom: 'var(--space-sm)' }} />
-        <p className="text-muted" style={{ fontSize: '0.85rem', margin: 0 }}>No performance data yet for this season.</p>
+        <p className="text-muted" style={{ fontSize: '0.85rem', margin: 0 }}>
+          {scope.isFamily
+            ? 'No performance data yet for this season.'
+            : 'No performance data yet for this clan. Switch to All Clans for the family table.'}
+        </p>
       </div>
     );
   }
@@ -69,7 +81,10 @@ export default function PerformancePanel() {
           <BarChart3 size={16} className="text-cta" />
           <div>
             <h3 style={{ fontSize: '0.95rem', margin: 0 }}>Season Performance</h3>
-            <p className="text-muted" style={{ fontSize: '0.72rem', margin: '2px 0 0' }}>Recognising war effort across all rounds — not a ranking.</p>
+            <p className="text-muted" style={{ fontSize: '0.72rem', margin: '2px 0 0' }}>
+              Recognising war effort across all rounds — not a ranking.
+              {!scope.isFamily && ' Showing this clan only.'}
+            </p>
           </div>
         </div>
         <select className="input" style={{ width: 'auto', padding: '6px 10px' }} value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>

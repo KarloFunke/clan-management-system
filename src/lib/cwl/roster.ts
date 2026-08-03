@@ -83,6 +83,30 @@ export async function loadWarIneligibleAccountTags(): Promise<Set<string>> {
 }
 
 /**
+ * Load the account tags a leader has marked NOT PARTICIPATING in this season (migration 031).
+ *
+ * This is the availability the engine cannot derive: nothing in a player's TH level, Ranked tier or
+ * strike record says they are away this week. It lives in its own table rather than on the
+ * allocation row precisely so it SURVIVES a re-allocation — generateAllocation deletes and rebuilds
+ * every allocation, so an opt-out recorded there would silently un-do itself the next time anyone
+ * reordered the clan priorities.
+ *
+ * Fail-safe like its war-ineligible sibling: on error it returns an empty set, so a broken read
+ * over-includes (a leader sees someone they meant to sit out) rather than blocking allocation.
+ */
+export async function loadOptedOutAccountTags(seasonId: string): Promise<Set<string>> {
+  const { data, error } = await supabase
+    .from('cwl_season_optouts')
+    .select('player_account_tag')
+    .eq('season_id', seasonId);
+  if (error) {
+    console.error('loadOptedOutAccountTags failed (non-fatal):', error);
+    return new Set();
+  }
+  return new Set((data as { player_account_tag: string }[] | null)?.map((r) => r.player_account_tag) || []);
+}
+
+/**
  * Reconcile the pending-transfer record for an allocation against its recommended vs actual clan.
  *  - recommended matches actual (or removed): no move needed — drop any still-pending transfer.
  *  - recommended differs: ensure exactly one pending transfer (from actual → to recommended).

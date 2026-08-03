@@ -5,6 +5,7 @@ import { Repeat } from 'lucide-react';
 import { useCWLStore } from '@/lib/stores/cwlStore';
 import { suggestClanRotation, roundsPlayedByAccount, type ClanRotation } from '@/lib/cwl/rotation';
 import { useClanName } from './useClanName';
+import { useCwlScope } from './useCwlScope';
 
 const th: React.CSSProperties = { textAlign: 'right', padding: '5px 8px', fontSize: '0.66rem', textTransform: 'uppercase', color: 'var(--color-muted)', whiteSpace: 'nowrap' };
 const td: React.CSSProperties = { textAlign: 'right', padding: '5px 8px', fontSize: '0.82rem', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' };
@@ -20,9 +21,12 @@ export default function RotationPanel() {
   const rounds = useCWLStore((s) => s.rounds);
   const members = useCWLStore((s) => s.warMembers);
   const clanName = useClanName();
+  const scope = useCwlScope();
 
   const rotations = useMemo<ClanRotation[]>(() => {
-    return seasonClans.map((sc) => {
+    // Each clan's rotation is computed only from its own roster and rounds, so scoping the list is
+    // a pure filter — no clan's suggestion depends on another's.
+    return seasonClans.filter((sc) => scope.includes(sc.clanId)).map((sc) => {
       // The signed roster for this clan (recommended there, not removed from the season).
       const roster = players
         .filter((p) => p.recommendedClanId === sc.clanId && p.status !== 'removed')
@@ -35,7 +39,7 @@ export default function RotationPanel() {
 
       return suggestClanRotation(sc.clanId, roster, sc.warSize, lockedRoundNumbers);
     });
-  }, [players, seasonClans, rounds, members]);
+  }, [players, seasonClans, rounds, members, scope]);
 
   const anyRoster = rotations.some((r) => r.rosterSize > 0);
   if (!anyRoster) {

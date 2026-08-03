@@ -495,3 +495,59 @@ describe('war-ineligible (struck) exclusion — matched on the account tag', () 
     expect(drafts.map((d) => d.playerTag).sort()).toEqual(['#a', '#b', '#c']);
   });
 });
+
+describe('opt-out — accounts a leader marked as not participating', () => {
+  it('leaves an opted-out account out of every clan and explains why', () => {
+    const players = [
+      acct('playing', { currentClanId: 'A', thLevel: 16 }),
+      acct('away', { currentClanId: 'A', thLevel: 16 }),
+    ];
+    const drafts = byTag(allocate(players, [CLAN_A, CLAN_B], NO_CONSTRAINTS, new Set(), new Set(['#away'])));
+    expect(drafts['#away'].status).toBe('removed');
+    expect(drafts['#away'].recommendedClanId).toBeNull();
+    expect(drafts['#away'].rank).toBeNull();
+    expect(drafts['#away'].note).toMatch(/not participating/i);
+    expect(drafts['#playing'].recommendedClanId).toBe('A');
+  });
+
+  it('opts out one alt without touching its owner\'s other accounts', () => {
+    const players = [
+      acct('main', { personId: 'irfan', currentClanId: 'A', thLevel: 16 }),
+      acct('alt', { personId: 'irfan', currentClanId: 'A', thLevel: 15 }),
+    ];
+    const drafts = byTag(allocate(players, [CLAN_A, CLAN_B], NO_CONSTRAINTS, new Set(), new Set(['#alt'])));
+    expect(drafts['#main'].recommendedClanId).toBe('A');
+    expect(drafts['#alt'].status).toBe('removed');
+  });
+
+  it('frees the slot for the next-strongest account rather than leaving the clan short', () => {
+    // The whole point of opting someone out before the roster is formed: the engine backfills.
+    const players = [
+      acct('a', { thLevel: 17 }),
+      acct('b', { thLevel: 16 }),
+      acct('c', { thLevel: 15 }),
+    ];
+    const drafts = allocate(
+      players,
+      [{ clanId: 'A', warSize: 2, priority: 0 }],
+      benchCap(0),
+      new Set(),
+      new Set(['#b']),
+    );
+    expect(placedIn(drafts, 'A').map((d) => d.playerTag).sort()).toEqual(['#a', '#c']);
+  });
+
+  it('reports an account that is both struck and opted out as struck (the actionable one)', () => {
+    const players = [acct('both', { currentClanId: 'A' })];
+    const drafts = allocate(players, [CLAN_A], NO_CONSTRAINTS, new Set(['#both']), new Set(['#both']));
+    // Exactly one row, never one per exclusion reason.
+    expect(drafts).toHaveLength(1);
+    expect(drafts[0].status).toBe('removed');
+    expect(drafts[0].note).toMatch(/war-ineligible/i);
+  });
+
+  it('is a no-op when nobody has opted out (default arg)', () => {
+    const players = [acct('1', { currentClanId: 'A' }), acct('2', { currentClanId: 'B' })];
+    expect(allocate(players, [CLAN_A, CLAN_B], NO_CONSTRAINTS).filter((d) => d.status === 'removed')).toHaveLength(0);
+  });
+});

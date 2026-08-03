@@ -6,6 +6,7 @@ import type { CWLLineupChangeEvent, CWLRound, CWLWarMember } from '@/types/datab
 import { useCWLStore } from '@/lib/stores/cwlStore';
 import { diffLineup, type LineupDiff } from '@/lib/cwl/lineup';
 import { useClanName } from './useClanName';
+import { useCwlScope } from './useCwlScope';
 import type { RosterPlayer } from './types';
 
 const STATE_LABEL: Record<string, string> = {
@@ -60,19 +61,24 @@ function swapSummary(changes: CWLLineupChangeEvent[]): string {
 
 /** Live per-round CWL lineups for the season, grouped by family clan. Read-only — filled by sync. */
 export default function LiveRoundsPanel() {
-  const rounds = useCWLStore((s) => s.rounds);
+  const allRounds = useCWLStore((s) => s.rounds);
   const members = useCWLStore((s) => s.warMembers);
   const players = useCWLStore((s) => s.players);
   const clanName = useClanName();
+  const scope = useCwlScope();
 
   const [open, setOpen] = useState<Record<string, boolean>>({});
+
+  const rounds = allRounds.filter((r) => scope.includes(r.clan_id));
 
   if (rounds.length === 0) {
     return (
       <div className="card" style={{ padding: 'var(--space-lg)', textAlign: 'center' }}>
         <Swords size={24} className="text-muted" style={{ marginBottom: 'var(--space-sm)' }} />
         <p className="text-muted" style={{ fontSize: '0.85rem', margin: 0 }}>
-          No live rounds yet — run a sync during CWL week to pull lineups.
+          {allRounds.length === 0
+            ? 'No live rounds yet — run a sync during CWL week to pull lineups.'
+            : 'No rounds for this clan yet. Switch to All Clans to see the rest of the family.'}
         </p>
       </div>
     );

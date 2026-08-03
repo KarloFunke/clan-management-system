@@ -16,6 +16,14 @@ export interface RosterPlayer {
   actualClanId: string | null;
   status: CWLAllocationStatus;
   isBench: boolean;
+  // The engine's reason for excluding this account (no eligible clan, family full, active strike,
+  // not participating), or the signup reconciler's reason for adding it. Null for a normally placed
+  // account and for a leader's manual removal.
+  note: string | null;
+  // Marked by leadership as not playing this season (cwl_season_optouts, migration 031). Held apart
+  // from `status` because it outlives the allocation row: a re-allocation rebuilds every row, and
+  // this flag is re-applied to the fresh one.
+  optedOut: boolean;
 }
 
 // A required in-game move. Clan ids (not names) — the panel resolves them through ClanContext, the
@@ -36,4 +44,4 @@ export interface SeasonClan {
   priority: number;
 }
 
-export type MoveAction = 'assign' | 'bench' | 'unbench' | 'remove';
+export type MoveAction = 'assign' | 'bench' | 'unbench' | 'remove' | 'opt_out' | 'opt_in';

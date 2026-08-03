@@ -44,6 +44,11 @@ function emptyTotals(): MemberPerf {
 }
 
 export function computeSeasonPerformance(rounds: CWLRound[], members: CWLWarMember[]): SeasonPerformance {
+  // `rounds` defines the scope of the roll-up, so a member row belonging to a round outside it is
+  // not ours to count. This matters the moment a caller passes a SUBSET — the per-clan split hands
+  // in one clan's rounds, and without this the stars and attacks of every other clan in the family
+  // would still be summed in, silently, under a heading claiming to be one clan's.
+  const inScope = new Set(rounds.map((r) => r.id));
   const endedRoundIds = new Set(rounds.filter((r) => r.state === 'warEnded').map((r) => r.id));
   // Prep day is not a played round — see the header note.
   const playedRoundIds = new Set(rounds.filter((r) => r.state === 'inWar' || r.state === 'warEnded').map((r) => r.id));
@@ -67,6 +72,7 @@ export function computeSeasonPerformance(rounds: CWLRound[], members: CWLWarMemb
   };
 
   for (const m of members) {
+    if (!inScope.has(m.round_id)) continue;
     const key = m.person_id ?? m.player_tag;
     const acc = ensure(key, { personId: m.person_id, playerTag: m.player_tag, name: m.name || m.player_tag });
     // A member can upgrade mid-season and alts group under one person key, so keep the highest TH —

@@ -3,9 +3,9 @@ import { computeSeasonPerformance } from './performance';
 import type { CWLRound, CWLWarMember } from '@/types/database';
 
 // Minimal round/member factories — only the fields the roll-up reads.
-function round(id: string, state: string): CWLRound {
+function round(id: string, state: string, clan_id = 'c'): CWLRound {
   return {
-    id, season_id: 's', clan_id: 'c', round_number: 1, war_tag: '#w', state,
+    id, season_id: 's', clan_id, round_number: 1, war_tag: '#w', state,
     team_size: 15, opponent_name: 'Foe', opponent_tag: '#F', our_stars: 0,
     our_destruction: 0, our_attacks_used: 0, start_time: null, end_time: null, polled_at: 'now',
   };
@@ -97,5 +97,43 @@ describe('computeSeasonPerformance', () => {
     ];
     const { perMember } = computeSeasonPerformance(rounds, members);
     expect(perMember.map((m) => m.personId)).toEqual(['high', 'low']);
+  });
+});
+
+// The per-clan split (the CWL board's clan scope) works by handing in only that clan's rounds, so
+// the roll-up has to treat `rounds` as the scope boundary rather than as a lookup table.
+describe('computeSeasonPerformance — scoped to a subset of rounds', () => {
+  it('ignores member rows belonging to rounds outside the given set', () => {
+    const ours = round('r-ours', 'warEnded', 'clan-a');
+    // 'r-theirs' deliberately has no round in scope — only its member row exists.
+    const members = [
+      member('r-ours', { person_id: 'p1', player_tag: '#A', name: 'Ann', attacks_used: 1, stars: 3, destruction: 100 }),
+      member('r-theirs', { person_id: 'p2', player_tag: '#B', name: 'Bob', attacks_used: 1, stars: 2, destruction: 50 }),
+    ];
+    // Only clan A's round is in scope, so only Ann exists and the totals are hers alone.
+    const { perMember, totals } = computeSeasonPerformance([ours], members);
+    expect(perMember.map((m) => m.name)).toEqual(['Ann']);
+    expect(totals.totalStars).toBe(3);
+    expect(totals.avgDestruction).toBeCloseTo(100);
+  });
+
+  it('splits one member who played for two clans into each clan\'s own totals', () => {
+    const a = round('r-a', 'warEnded', 'clan-a');
+    const b = round('r-b', 'warEnded', 'clan-b');
+    const members = [
+      member('r-a', { person_id: 'p1', player_tag: '#A', name: 'Ann', attacks_used: 1, stars: 3, destruction: 100 }),
+      member('r-b', { person_id: 'p1', player_tag: '#A', name: 'Ann', attacks_used: 1, stars: 1, destruction: 40 }),
+    ];
+    expect(computeSeasonPerformance([a], members).perMember[0].totalStars).toBe(3);
+    expect(computeSeasonPerformance([b], members).perMember[0].totalStars).toBe(1);
+    // ...and the family view still sees the whole picture.
+    expect(computeSeasonPerformance([a, b], members).perMember[0].totalStars).toBe(4);
+  });
+
+  it('returns an empty roll-up when the scope has no rounds at all', () => {
+    const members = [member('r1', { player_tag: '#A', attacks_used: 1, stars: 3 })];
+    const { perMember, totals } = computeSeasonPerformance([], members);
+    expect(perMember).toHaveLength(0);
+    expect(totals.totalStars).toBe(0);
   });
 });
