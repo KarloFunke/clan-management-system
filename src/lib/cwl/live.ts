@@ -2,6 +2,7 @@ import { supabase } from '@/lib/supabase';
 import { pollLeagueState, type TaggedLeagueWar } from './api';
 import { UNREVEALED_WAR_TAG, type CoCLeagueWarClan } from '@/lib/coc-api';
 import { buildLineup, persistWarAttacks } from '@/lib/warAttacks';
+import { parseCoCTime } from '@/lib/cocTime';
 import { notifyLineupIfRevealed, recordLineupChange } from './lineupNotify';
 import type { FieldedSlot } from './lineupChange';
 import { reconcileSeasonSignups } from './signupSync';
@@ -94,8 +95,8 @@ async function ingestClan(seasonId: string, clanId: string, clanTag: string): Pr
           our_stars: side.us.stars,
           our_destruction: side.us.destructionPercentage,
           our_attacks_used: side.us.attacks,
-          start_time: war.startTime || null,
-          end_time: war.endTime || null,
+          start_time: parseCoCTime(war.startTime),
+          end_time: parseCoCTime(war.endTime),
           polled_at: new Date().toISOString(),
         },
         { onConflict: 'season_id,clan_id,round_number' },
@@ -186,7 +187,7 @@ async function ingestClan(seasonId: string, clanId: string, clanTag: string): Pr
       roundNumber,
       state: war.state,
       opponentName: side.them.name,
-      startTime: war.startTime || null,
+      startTime: parseCoCTime(war.startTime),
     });
 
     // ...and, for a round already revealed on an earlier poll, whether the lineup has since CHANGED.
@@ -197,7 +198,7 @@ async function ingestClan(seasonId: string, clanId: string, clanTag: string): Pr
       roundNumber,
       state: war.state,
       opponentName: side.them.name,
-      startTime: war.startTime || null,
+      startTime: parseCoCTime(war.startTime),
       previous: previousFielded,
       current: side.us.members.map((m) => ({ playerTag: m.tag, name: m.name })),
     });

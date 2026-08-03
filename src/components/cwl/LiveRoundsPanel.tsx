@@ -121,6 +121,9 @@ export default function LiveRoundsPanel() {
               // Swaps made after the reveal. The plan is rewritten from the in-game signup list on
               // every sync, so the drift badge beside it cannot see these — only this log can.
               const swaps = r.lineup_changes || [];
+              // Anyone brought in after the reveal is tagged in the lineup itself too, not just in
+              // the log — the plan-based check above cannot flag them once the plan has caught up.
+              const swappedInLate = new Set(swaps.flatMap((c) => c.swappedIn.map((p) => p.playerTag.toUpperCase())));
               return (
                 <div key={r.id}>
                   <button
@@ -176,7 +179,8 @@ export default function LiveRoundsPanel() {
                       )}
                       {roster.map((m) => {
                         const missed = m.attacks_used === 0 && ended;
-                        const swappedIn = swappedInTags.has(m.player_tag.toUpperCase());
+                        const tagKey = m.player_tag.toUpperCase();
+                        const swappedIn = swappedInTags.has(tagKey) || swappedInLate.has(tagKey);
                         return (
                           <div key={m.id} style={{ display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', gap: 'var(--space-sm)', fontSize: '0.8rem' }}>
                             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

@@ -56,7 +56,12 @@ const LEVEL_EMOJI: Record<StrikeLevel, string> = {
  * `D` = long date (e.g. "12 October 2026"), `R` = relative (e.g. "in 2 months"). See
  * https://discord.com/developers/docs/reference#message-formatting-timestamp-styles. */
 function discordTs(iso: string, style: 'd' | 'D' | 'f' | 'F' | 'R' = 'D'): string {
-  return `<t:${Math.floor(new Date(iso).getTime() / 1000)}:${style}>`;
+  const ms = new Date(iso).getTime();
+  // A value Date cannot parse would render literally as `<t:NaN:f>`. Callers normalise CoC's compact
+  // timestamps with parseCoCTime (see lib/cocTime.ts); this is the backstop so a miss anywhere else
+  // degrades to the raw string instead of printing NaN at the family.
+  if (Number.isNaN(ms)) return iso;
+  return `<t:${Math.floor(ms / 1000)}:${style}>`;
 }
 
 export type DiscordEmbedField = { name: string; value: string; inline?: boolean };

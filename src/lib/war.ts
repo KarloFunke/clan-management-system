@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import { fetchCurrentWar, type CoCWarClan } from './coc-api';
+import { parseCoCTime } from './cocTime';
 import { buildLineup, persistWarAttacks } from './warAttacks';
 
 /**
@@ -37,7 +38,7 @@ async function ingestClan(clanId: string, clanTag: string): Promise<number> {
     .upsert(
       {
         clan_id: clanId,
-        prep_start_time: war.preparationStartTime || null,
+        prep_start_time: parseCoCTime(war.preparationStartTime),
         state: war.state,
         team_size: war.teamSize ?? null,
         attacks_per_member: war.attacksPerMember ?? 2,
@@ -47,8 +48,8 @@ async function ingestClan(clanId: string, clanTag: string): Promise<number> {
         our_stars: us.stars,
         our_destruction: us.destructionPercentage,
         our_attacks_used: us.attacks,
-        start_time: war.startTime || null,
-        end_time: war.endTime || null,
+        start_time: parseCoCTime(war.startTime),
+        end_time: parseCoCTime(war.endTime),
         polled_at: new Date().toISOString(),
       },
       { onConflict: 'clan_id,prep_start_time' },
