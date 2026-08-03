@@ -442,6 +442,17 @@ export interface CWLRound {
   // When the round-reveal lineup notice was posted to Discord (migration 027). Null = not sent yet;
   // set once, on a successful send, so a failed post retries on the next sync.
   lineup_notified_at: string | null;
+  // Append-only log of lineup swaps seen AFTER the reveal, newest last (migration 030). The plan is
+  // rewritten from the in-game signup list every sync, so this is the only record that a player was
+  // swapped in or out during preparation.
+  lineup_changes: CWLLineupChangeEvent[];
+  lineup_changed_at: string | null;
+}
+
+export interface CWLLineupChangeEvent {
+  at: string;
+  swappedIn: { playerTag: string; name: string }[];
+  swappedOut: { playerTag: string; name: string }[];
 }
 
 // One of our members' lineup slot + attack result within a round. attacks_used is 0 or 1 (CWL

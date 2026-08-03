@@ -630,6 +630,74 @@ export async function notifyRoundLineup(params: {
   );
 }
 
+/**
+ * A lineup SWAP during preparation — the lineup changed after it had already been revealed.
+ *
+ * Separate from notifyRoundLineup on purpose. That one announces the reveal and reads the war
+ * against the formed roster; this one reads it against the lineup we saw last poll, which from
+ * sign-up onward is the only comparison that still carries information (see cwl/lineupChange.ts).
+ * The audience is different too: a swap is aimed squarely at the player who has just been given a
+ * war they were not expecting, so the swapped-IN accounts get a real @mention in the message
+ * content — a mention inside an embed renders but never notifies — while the swapped-out are named
+ * with `allowed_mentions` withheld, exactly as the reveal notice does.
+ */
+export async function notifyLineupSwap(params: {
+  clanName: string;
+  roundNumber: number;
+  opponentName?: string | null;
+  startTime?: string | null;
+  swappedIn: { playerTag: string; name: string }[];
+  swappedOut: { playerTag: string; name: string }[];
+  /** Discord ids for the swapped-IN accounts, in the same order; null where there is no link. */
+  swappedInMentions: (string | null)[];
+  webhookUrl?: string | null;
+}): Promise<boolean> {
+  const { clanName, roundNumber, opponentName, startTime, swappedIn, swappedOut, swappedInMentions, webhookUrl } = params;
+  if (!swappedIn.length && !swappedOut.length) return false;
+
+  const mentionIds = swappedInMentions.filter((id): id is string => !!id);
+  const fields: DiscordEmbedField[] = [];
+
+  if (swappedIn.length) {
+    fields.push({
+      name: `⬆️ Now in the war (${swappedIn.length})`,
+      value: truncateField(
+        swappedIn
+          .map((p, i) => `• ${swappedInMentions[i] ? `<@${swappedInMentions[i]}>` : `**${p.name}**`} (${p.playerTag})`)
+          .join('\n'),
+      ),
+    });
+  }
+
+  if (swappedOut.length) {
+    fields.push({
+      name: `⬇️ No longer in the war (${swappedOut.length})`,
+      value: truncateField(swappedOut.map((p) => `• ${p.name} (${p.playerTag})`).join('\n')),
+    });
+  }
+
+  if (startTime) {
+    fields.push({ name: 'Battle day starts', value: `${discordTs(startTime, 'f')} (${discordTs(startTime, 'R')})`, inline: false });
+  }
+
+  return sendDiscordMessage(
+    {
+      content: mentionIds.length ? mentionIds.map((id) => `<@${id}>`).join(' ') : undefined,
+      allowed_mentions: { users: mentionIds },
+      embeds: [
+        {
+          title: `🔁 Round ${roundNumber} — lineup swap`,
+          description: `**${clanName}**${opponentName ? ` vs ${opponentName}` : ''} · the war roster changed during preparation`,
+          color: COLOR_WARNING,
+          fields,
+          footer: { text: 'ClanOps · CWL' },
+        },
+      ],
+    },
+    webhookUrl,
+  );
+}
+
 function formatRemainingTime(hours: number): string {
   const totalMinutes = Math.max(0, Math.round(hours * 60));
   const wholeHours = Math.floor(totalMinutes / 60);

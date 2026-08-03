@@ -2,7 +2,8 @@ import { supabase } from '@/lib/supabase';
 import { pollLeagueState, type TaggedLeagueWar } from './api';
 import { UNREVEALED_WAR_TAG, type CoCLeagueWarClan } from '@/lib/coc-api';
 import { buildLineup, persistWarAttacks } from '@/lib/warAttacks';
-import { notifyLineupIfRevealed } from './lineupNotify';
+import { notifyLineupIfRevealed, recordLineupChange } from './lineupNotify';
+import type { FieldedSlot } from './lineupChange';
 import { reconcileSeasonSignups } from './signupSync';
 import type { ClanSignup } from './signupReconcile';
 
@@ -119,6 +120,15 @@ async function ingestClan(seasonId: string, clanId: string, clanTag: string): Pr
       }
     }
 
+    // The lineup as we last recorded it, read BEFORE this poll overwrites it. It is the only thing a
+    // mid-preparation swap can be detected against (see lineupChange.ts).
+    const { data: priorMembers } = await supabase
+      .from('cwl_war_members')
+      .select('player_tag, name')
+      .eq('round_id', roundRow.id);
+    const previousFielded: FieldedSlot[] = ((priorMembers as { player_tag: string; name: string | null }[] | null) || [])
+      .map((m) => ({ playerTag: m.player_tag, name: m.name || m.player_tag }));
+
     const memberRows = side.us.members.map((m) => {
       const r = memberResult(m);
       return {
@@ -136,6 +146,24 @@ async function ingestClan(seasonId: string, clanId: string, clanTag: string): Pr
         .from('cwl_war_members')
         .upsert(memberRows, { onConflict: 'round_id,player_tag' });
       if (memErr) console.error('CWL war members upsert failed:', memErr);
+    }
+
+    // PRUNE anyone no longer in the war. The upsert only ever adds and updates, so before this a
+    // swapped-out player kept their row forever: a 15v15 read back as 16 bodies, and — worse — once
+    // the round ended that ghost row was a member with zero attacks in an ended war, which is
+    // precisely what the war_missed_attack detector strikes. A player pulled from the lineup could
+    // be struck for a war they were never in. The in-game roster is the authority on who is in it.
+    const currentTags = side.us.members.map((m) => m.tag);
+    const staleTags = previousFielded
+      .filter((p) => !currentTags.some((t) => t.toUpperCase() === p.playerTag.toUpperCase()))
+      .map((p) => p.playerTag);
+    if (staleTags.length) {
+      const { error: delErr } = await supabase
+        .from('cwl_war_members')
+        .delete()
+        .eq('round_id', roundRow.id)
+        .in('player_tag', staleTags);
+      if (delErr) console.error('CWL stale war member prune failed:', delErr);
     }
 
     await persistWarAttacks({
@@ -159,6 +187,19 @@ async function ingestClan(seasonId: string, clanId: string, clanTag: string): Pr
       state: war.state,
       opponentName: side.them.name,
       startTime: war.startTime || null,
+    });
+
+    // ...and, for a round already revealed on an earlier poll, whether the lineup has since CHANGED.
+    // No-ops on the reveal poll itself (nothing to compare against) and outside preparation.
+    await recordLineupChange({
+      clanId,
+      roundId: roundRow.id,
+      roundNumber,
+      state: war.state,
+      opponentName: side.them.name,
+      startTime: war.startTime || null,
+      previous: previousFielded,
+      current: side.us.members.map((m) => ({ playerTag: m.tag, name: m.name })),
     });
   }
 

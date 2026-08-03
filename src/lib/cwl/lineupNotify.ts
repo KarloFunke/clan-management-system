@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import { diffLineup, type PlannedSlot, type ActualSlot } from './lineup';
-import { discordIdsForAccountTags, notifyRoundLineup, webhookUrlForClan } from '@/lib/discord';
+import { diffFieldedLineups, type FieldedSlot } from './lineupChange';
+import { discordIdsForAccountTags, notifyLineupSwap, notifyRoundLineup, webhookUrlForClan } from '@/lib/discord';
 
 /**
  * The DB/notify half of the planned-vs-actual lineup check — `lineup.ts` is the pure diff.
@@ -108,5 +109,86 @@ export async function notifyLineupIfRevealed(params: {
     }
   } catch (err) {
     console.error(`CWL lineup notice failed for round ${roundId} (non-fatal):`, err);
+  }
+}
+
+/** One appended entry of cwl_rounds.lineup_changes (migration 030). */
+interface LineupChangeEvent {
+  at: string;
+  swappedIn: FieldedSlot[];
+  swappedOut: FieldedSlot[];
+}
+
+/**
+ * Record — and announce — a lineup swap made AFTER the round was revealed.
+ *
+ * `notifyLineupIfRevealed` above fires once and stamps the round, which is right for the reveal and
+ * leaves a mid-preparation swap silent. This is the other half: called from live.ts with the lineup
+ * as it stood before this poll and as it stands after, so the comparison is lineup-vs-lineup rather
+ * than lineup-vs-plan (the plan is rewritten from the in-game signup list every sync and would show
+ * "as planned" one poll later — see lineupChange.ts).
+ *
+ * Preparation only. The CWL war roster locks when battle day starts, so a membership difference in
+ * any later state is not a leader's swap and there is nothing anyone could act on.
+ *
+ * The event is appended to the round WHETHER OR NOT Discord accepts the message: the swap is an
+ * observed fact and the round card is its durable record, while the notice is best-effort like the
+ * rest of the notify layer. Idempotency needs no stamp — the next poll compares against a lineup
+ * that now includes this change, so an unchanged lineup produces nothing.
+ */
+export async function recordLineupChange(params: {
+  clanId: string;
+  roundId: string;
+  roundNumber: number;
+  state: string;
+  opponentName: string | null;
+  startTime: string | null;
+  previous: FieldedSlot[];
+  current: FieldedSlot[];
+}): Promise<void> {
+  const { clanId, roundId, roundNumber, state, opponentName, startTime, previous, current } = params;
+  if (state !== 'preparation') return;
+  // Nothing recorded yet means this poll IS the reveal, which notifyLineupIfRevealed announces.
+  if (previous.length === 0) return;
+
+  try {
+    const change = diffFieldedLineups(previous, current);
+    if (!change.changed) return;
+
+    const { data: round } = await supabase
+      .from('cwl_rounds')
+      .select('lineup_changes')
+      .eq('id', roundId)
+      .maybeSingle();
+
+    const at = new Date().toISOString();
+    const history = ((round?.lineup_changes as LineupChangeEvent[] | null) || []).concat({
+      at,
+      swappedIn: change.swappedIn,
+      swappedOut: change.swappedOut,
+    });
+
+    await supabase
+      .from('cwl_rounds')
+      .update({ lineup_changes: history, lineup_changed_at: at })
+      .eq('id', roundId);
+
+    const [swappedInMentions, { data: clan }] = await Promise.all([
+      discordIdsForAccountTags(change.swappedIn.map((s) => s.playerTag)),
+      supabase.from('clans').select('display_name').eq('id', clanId).maybeSingle(),
+    ]);
+
+    await notifyLineupSwap({
+      clanName: clan?.display_name || 'Clan',
+      roundNumber,
+      opponentName,
+      startTime,
+      swappedIn: change.swappedIn,
+      swappedOut: change.swappedOut,
+      swappedInMentions,
+      webhookUrl: await webhookUrlForClan(clanId),
+    });
+  } catch (err) {
+    console.error(`CWL lineup change record failed for round ${roundId} (non-fatal):`, err);
   }
 }

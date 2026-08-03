@@ -1,8 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { Swords, ChevronDown, ChevronRight, Star, ArrowUp, ArrowDown } from 'lucide-react';
-import type { CWLRound, CWLWarMember } from '@/types/database';
+import { Swords, ChevronDown, ChevronRight, Star, ArrowUp, ArrowDown, Repeat } from 'lucide-react';
+import type { CWLLineupChangeEvent, CWLRound, CWLWarMember } from '@/types/database';
 import { useCWLStore } from '@/lib/stores/cwlStore';
 import { diffLineup, type LineupDiff } from '@/lib/cwl/lineup';
 import { useClanName } from './useClanName';
@@ -44,6 +44,18 @@ function LineupDrift({ diff }: { diff: LineupDiff }) {
       )}
     </span>
   );
+}
+
+/** Hover text for the swap badge — one line per recorded change. */
+function swapSummary(changes: CWLLineupChangeEvent[]): string {
+  return changes
+    .map((c) => {
+      const parts: string[] = [];
+      if (c.swappedIn.length) parts.push(`in: ${c.swappedIn.map((p) => p.name).join(', ')}`);
+      if (c.swappedOut.length) parts.push(`out: ${c.swappedOut.map((p) => p.name).join(', ')}`);
+      return `${new Date(c.at).toLocaleString()} — ${parts.join(' · ')}`;
+    })
+    .join('\n');
 }
 
 /** Live per-round CWL lineups for the season, grouped by family clan. Read-only — filled by sync. */
@@ -106,6 +118,9 @@ export default function LiveRoundsPanel() {
               // Only meaningful once a lineup exists; an unrevealed round would read as "everyone out".
               const showDrift = roster.length > 0;
               const swappedInTags = new Set(diff.swappedIn.map((p) => p.playerTag.toUpperCase()));
+              // Swaps made after the reveal. The plan is rewritten from the in-game signup list on
+              // every sync, so the drift badge beside it cannot see these — only this log can.
+              const swaps = r.lineup_changes || [];
               return (
                 <div key={r.id}>
                   <button
@@ -123,6 +138,14 @@ export default function LiveRoundsPanel() {
                       <span className="text-muted"> vs {r.opponent_name || '—'}</span>
                       <span className="text-muted" style={{ fontSize: '0.7rem', textTransform: 'uppercase', marginLeft: 6 }}>{STATE_LABEL[r.state] || r.state}</span>
                       {showDrift && <span style={{ marginLeft: 8 }}><LineupDrift diff={diff} /></span>}
+                      {swaps.length > 0 && (
+                        <span
+                          title={`The lineup changed after it was revealed:\n${swapSummary(swaps)}`}
+                          style={{ marginLeft: 8, display: 'inline-flex', alignItems: 'center', gap: 2, fontSize: '0.68rem', color: 'var(--color-warning)', fontWeight: 700 }}
+                        >
+                          <Repeat size={11} />{swaps.length} swap{swaps.length === 1 ? '' : 's'}
+                        </span>
+                      )}
                     </span>
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '0.8rem', fontVariantNumeric: 'tabular-nums' }}>
                       <Star size={12} className="text-cta" /> {r.our_stars}
@@ -135,6 +158,17 @@ export default function LiveRoundsPanel() {
                       {roster.length === 0 && <span className="text-muted" style={{ fontSize: '0.8rem' }}>No lineup recorded.</span>}
                       {/* Planned starters who never made the war — they have no row of their own here,
                           so they are listed above the lineup rather than silently vanishing. */}
+                      {/* Post-reveal swaps, oldest first — the durable record of a lineup change a
+                          leader made on prep day, which the plan-based drift badge cannot show. */}
+                      {swaps.map((c) => (
+                        <div key={c.at} style={{ fontSize: '0.72rem', color: 'var(--color-warning)', paddingBottom: 2 }}>
+                          <Repeat size={10} style={{ verticalAlign: -1, marginRight: 4 }} />
+                          {new Date(c.at).toLocaleString()} —{' '}
+                          {c.swappedIn.length > 0 && <>in: {c.swappedIn.map((p) => p.name).join(', ')}</>}
+                          {c.swappedIn.length > 0 && c.swappedOut.length > 0 && ' · '}
+                          {c.swappedOut.length > 0 && <>out: {c.swappedOut.map((p) => p.name).join(', ')}</>}
+                        </div>
+                      ))}
                       {showDrift && diff.swappedOut.length > 0 && (
                         <div className="text-muted" style={{ fontSize: '0.72rem', paddingBottom: 2 }}>
                           Not fielded: {diff.swappedOut.map((p) => p.name).join(', ')}
