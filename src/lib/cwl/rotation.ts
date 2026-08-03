@@ -28,6 +28,9 @@ export interface RotationPlayer {
   thLevel: number;
   leagueTier: CWLLeagueTierId | null;
   playedSoFar: number; // rounds already fought (seeds fairness so under-played players catch up)
+  // Rounds this account has been marked unavailable for (cwl_season_optouts' partial window,
+  // migration 032). Empty for everyone the leader has said nothing about.
+  unavailableRounds?: ReadonlySet<number>;
 }
 
 /** An account referenced inside a round plan or summary (a thin slice of RotationPlayer). */
@@ -40,8 +43,12 @@ export interface RotationSlot {
 /** The suggested lineup for one not-yet-locked round. */
 export interface RotationRoundPlan {
   roundNumber: number;
-  playing: RotationSlot[]; // exactly warSize (or the whole roster when it is smaller)
+  playing: RotationSlot[]; // exactly warSize (or the whole AVAILABLE roster when it is smaller)
   bench: RotationSlot[]; // everyone sitting this round — the actionable "who to bench" list
+  // Marked unavailable for this round, so not an option either way. Held apart from `bench` because
+  // benching is a decision the leader is making and this is one already made for them — and because
+  // a lineup that comes up short needs to name who is missing, not just be quietly small.
+  unavailable: RotationSlot[];
 }
 
 /** Per-player projection across the remaining rounds. */
@@ -51,7 +58,8 @@ export interface PlayerRotationSummary {
   thLevel: number;
   playedSoFar: number;
   suggestedPlays: number; // remaining rounds we recommend they play
-  benchRounds: number; // remaining rounds we recommend they sit
+  benchRounds: number; // remaining rounds we recommend they sit (excludes unavailable ones)
+  unavailableRounds: number; // remaining rounds they cannot play at all
   projectedTotal: number; // playedSoFar + suggestedPlays — the season-end war-day count
 }
 
@@ -133,10 +141,21 @@ export function suggestClanRotation(
     plays.set(p.playerTag, 0);
   }
 
+  const isOut = (p: RotationPlayer, roundNumber: number) => p.unavailableRounds?.has(roundNumber) ?? false;
+  const unavailableCount = new Map<string, number>();
+  for (const p of roster) unavailableCount.set(p.playerTag, 0);
+
   const rounds: RotationRoundPlan[] = remainingRoundNumbers.map((roundNumber) => {
+    // Anyone marked unavailable is not a candidate at all — planning them in and then benching them
+    // would spend a fairness slot on a round they were never going to fight, pushing a player who
+    // COULD have played onto the bench in their place.
+    const unavailable = roster.filter((p) => isOut(p, roundNumber));
+    for (const p of unavailable) unavailableCount.set(p.playerTag, unavailableCount.get(p.playerTag)! + 1);
+    const available = roster.filter((p) => !isOut(p, roundNumber));
+
     // Fairness order: fewest rounds played so far goes in first (catch-up); ties broken by strength so
     // the stronger of two equally-rested players takes the slot. Fresh sort each round as counts change.
-    const order = roster.slice().sort((a, b) => {
+    const order = available.slice().sort((a, b) => {
       const pa = played.get(a.playerTag)!;
       const pb = played.get(b.playerTag)!;
       if (pa !== pb) return pa - pb;
@@ -148,7 +167,12 @@ export function suggestClanRotation(
       played.set(p.playerTag, played.get(p.playerTag)! + 1);
       plays.set(p.playerTag, plays.get(p.playerTag)! + 1);
     }
-    return { roundNumber, playing: playing.map(toSlot), bench: bench.map(toSlot) };
+    return {
+      roundNumber,
+      playing: playing.map(toSlot),
+      bench: bench.map(toSlot),
+      unavailable: unavailable.map(toSlot),
+    };
   });
 
   const remainingCount = remainingRoundNumbers.length;
@@ -157,13 +181,17 @@ export function suggestClanRotation(
     .sort(byStrength)
     .map((p) => {
       const suggestedPlays = plays.get(p.playerTag)!;
+      const out = unavailableCount.get(p.playerTag)!;
       return {
         playerTag: p.playerTag,
         name: p.name,
         thLevel: p.thLevel,
         playedSoFar: p.playedSoFar,
         suggestedPlays,
-        benchRounds: remainingCount - suggestedPlays,
+        // Rounds they were available for and we still sat them. Counting the unavailable ones as
+        // bench would read as the rotation treating them unfairly when it never had the choice.
+        benchRounds: remainingCount - suggestedPlays - out,
+        unavailableRounds: out,
         projectedTotal: p.playedSoFar + suggestedPlays,
       };
     });

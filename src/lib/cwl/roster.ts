@@ -91,6 +91,12 @@ export async function loadWarIneligibleAccountTags(): Promise<Set<string>> {
  * every allocation, so an opt-out recorded there would silently un-do itself the next time anyone
  * reordered the clan priorities.
  *
+ * Only FULL-SEASON opt-outs are returned (migration 032's null window). A partial one — away for the
+ * first two rounds, gone after the fifth — must still be rostered, because it has to be in a clan to
+ * fight the rounds it IS available for; that constraint is the rotation suggester's, not the
+ * allocation engine's. Excluding it here would cost the clan a body for seven rounds to solve a
+ * problem that exists for two. See cwl/availability.ts.
+ *
  * Fail-safe like its war-ineligible sibling: on error it returns an empty set, so a broken read
  * over-includes (a leader sees someone they meant to sit out) rather than blocking allocation.
  */
@@ -98,7 +104,8 @@ export async function loadOptedOutAccountTags(seasonId: string): Promise<Set<str
   const { data, error } = await supabase
     .from('cwl_season_optouts')
     .select('player_account_tag')
-    .eq('season_id', seasonId);
+    .eq('season_id', seasonId)
+    .is('unavailable_from_round', null);
   if (error) {
     console.error('loadOptedOutAccountTags failed (non-fatal):', error);
     return new Set();

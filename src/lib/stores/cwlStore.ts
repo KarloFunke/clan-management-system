@@ -27,7 +27,15 @@ import type {
 } from '@/types/database';
 import { normalizeLeagueTier } from '@/lib/cwl/leagues';
 import type { SeasonPosts } from '@/lib/cwl/rosterPostNotify';
-import type { RosterPlayer, TransferItem, SeasonClan, MoveAction } from '@/components/cwl/types';
+import type { RosterPlayer, TransferItem, SeasonClan, MoveAction, MoveOptions } from '@/components/cwl/types';
+import type { AvailabilityWindow } from '@/lib/cwl/availability';
+
+/** An opt-out row: the account, plus the round span it is unavailable for (null ends = all season). */
+type OptoutRow = {
+  player_account_tag: string;
+  unavailable_from_round: number | null;
+  unavailable_to_round: number | null;
+};
 
 type ToastType = 'success' | 'error';
 export type CWLToast = { message: string; type: ToastType } | null;
@@ -81,7 +89,11 @@ function toTransferItem(row: TransferRow): TransferItem {
 }
 
 /** Map an allocation row + its embeds into the board's view model. */
-function toRosterPlayer(row: AllocationRow, altPersonIds: Set<string>, optedOut: Set<string>): RosterPlayer {
+function toRosterPlayer(
+  row: AllocationRow,
+  altPersonIds: Set<string>,
+  optedOut: Map<string, AvailabilityWindow>,
+): RosterPlayer {
   return {
     allocationId: row.id,
     playerTag: row.player_account_tag,
@@ -96,7 +108,7 @@ function toRosterPlayer(row: AllocationRow, altPersonIds: Set<string>, optedOut:
     status: row.status,
     isBench: row.is_bench,
     note: row.note,
-    optedOut: optedOut.has(row.player_account_tag),
+    unavailable: optedOut.get(row.player_account_tag) ?? null,
   };
 }
 
@@ -134,7 +146,7 @@ type CWLState = {
     clans: { clanId: string; warSize: number; priority: number }[];
     constraints: CWLConstraints;
   }) => Promise<string | null>;
-  moveAllocation: (allocationId: string, action: MoveAction, clanId?: string) => Promise<void>;
+  moveAllocation: (allocationId: string, action: MoveAction, clanId?: string, options?: MoveOptions) => Promise<void>;
   toggleTransfer: (transferId: string, done: boolean) => Promise<void>;
   setSeasonStatus: (status: CWLSeasonStatus) => Promise<void>;
   reorderClans: (clanIds: string[]) => Promise<void>;
@@ -199,14 +211,20 @@ export const useCWLStore = create<CWLState>((set, get) => ({
           supabase.from('cwl_allocations').select(ALLOCATION_SELECT).eq('season_id', seasonId),
           supabase.from('cwl_transfers').select(TRANSFER_SELECT).eq('allocation.season_id', seasonId),
           supabase.from('cwl_rounds').select('*').eq('season_id', seasonId),
-          supabase.from('cwl_season_optouts').select('player_account_tag').eq('season_id', seasonId),
+          supabase
+            .from('cwl_season_optouts')
+            .select('player_account_tag, unavailable_from_round, unavailable_to_round')
+            .eq('season_id', seasonId),
         ]);
 
       const allocations = (allocRows as unknown as AllocationRow[]) || [];
       // Read separately from the allocations because it is not part of one: the opt-out is an input
       // to the engine that outlives any single generated row (migration 031).
-      const optedOut = new Set(
-        ((optoutRows as { player_account_tag: string }[] | null) || []).map((r) => r.player_account_tag),
+      const optedOut = new Map<string, AvailabilityWindow>(
+        ((optoutRows as OptoutRow[] | null) || []).map((r) => [
+          r.player_account_tag,
+          { fromRound: r.unavailable_from_round, toRound: r.unavailable_to_round },
+        ]),
       );
 
       // A person with more than one allocated account is flying alts; the board marks those rows so
@@ -254,13 +272,21 @@ export const useCWLStore = create<CWLState>((set, get) => ({
     }
   },
 
-  moveAllocation: async (allocationId, action, clanId) => {
+  moveAllocation: async (allocationId, action, clanId, options) => {
     set({ movingAllocationId: allocationId });
     try {
-      const { allocation } = await send('/api/cwl/allocations/move', 'POST', { allocationId, action, clanId });
+      const { allocation } = await send('/api/cwl/allocations/move', 'POST', {
+        allocationId, action, clanId, fromRound: options?.fromRound, toRound: options?.toRound,
+      });
       // opt_out / opt_in write cwl_season_optouts, which is not part of the returned allocation row,
-      // so the flag is derived from the action that just succeeded rather than read back.
-      const optedOutAfter = action === 'opt_out' ? true : action === 'opt_in' ? false : null;
+      // so the window is derived from the action that just succeeded rather than read back. An
+      // opt_out with no window is the whole season — the unbounded { null, null }.
+      const unavailableAfter: AvailabilityWindow | null | undefined =
+        action === 'opt_out'
+          ? { fromRound: options?.fromRound ?? null, toRound: options?.toRound ?? null }
+          : action === 'opt_in'
+            ? null
+            : undefined;
       // Splice just this card. The engine's rank ordering is recomputed client-side by the board's
       // strength sort, so nothing else on screen is stale.
       set((s) => ({
@@ -273,7 +299,7 @@ export const useCWLStore = create<CWLState>((set, get) => ({
                 status: allocation.status,
                 isBench: allocation.is_bench,
                 note: allocation.note ?? null,
-                optedOut: optedOutAfter ?? p.optedOut,
+                unavailable: unavailableAfter === undefined ? p.unavailable : unavailableAfter,
               }
             : p,
         ),

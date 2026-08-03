@@ -17,6 +17,7 @@ import RosterPostModal from './RosterPostModal';
 import CollapsibleSection from './CollapsibleSection';
 import { useClanName } from './useClanName';
 import { useCwlScope } from './useCwlScope';
+import { isFullSeason } from '@/lib/cwl/availability';
 
 const STATUS_FLOW: CWLSeasonStatus[] = ['planning', 'transfers_pending', 'signed_up', 'in_progress', 'completed'];
 const STATUS_LABEL: Record<CWLSeasonStatus, string> = {
@@ -64,7 +65,9 @@ export default function SeasonView({ season }: { season: CWLSeason }) {
   const allocated = players.filter((p) => p.status !== 'removed' && scope.includes(p.recommendedClanId));
   const benched = allocated.filter((p) => p.isBench).length;
   const openTransfers = scopedTransfers.filter((t) => t.status === 'pending').length;
-  const optedOut = players.filter((p) => p.optedOut).length;
+  // Only full-season opt-outs are 'not playing'. A windowed one is still on the roster fighting
+  // most of the season, so counting it here would understate the family's available strength.
+  const optedOut = players.filter((p) => p.unavailable && isFullSeason(p.unavailable)).length;
 
   const planning = (
     <>

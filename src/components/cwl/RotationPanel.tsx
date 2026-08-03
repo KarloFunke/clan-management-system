@@ -6,6 +6,7 @@ import { useCWLStore } from '@/lib/stores/cwlStore';
 import { suggestClanRotation, roundsPlayedByAccount, type ClanRotation } from '@/lib/cwl/rotation';
 import { useClanName } from './useClanName';
 import { useCwlScope } from './useCwlScope';
+import { unavailableRounds } from '@/lib/cwl/availability';
 
 const th: React.CSSProperties = { textAlign: 'right', padding: '5px 8px', fontSize: '0.66rem', textTransform: 'uppercase', color: 'var(--color-muted)', whiteSpace: 'nowrap' };
 const td: React.CSSProperties = { textAlign: 'right', padding: '5px 8px', fontSize: '0.82rem', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' };
@@ -30,7 +31,17 @@ export default function RotationPanel() {
       // The signed roster for this clan (recommended there, not removed from the season).
       const roster = players
         .filter((p) => p.recommendedClanId === sc.clanId && p.status !== 'removed')
-        .map((p) => ({ playerTag: p.playerTag, name: p.name, thLevel: p.thLevel, leagueTier: p.leagueTier, playedSoFar: 0 }));
+        .map((p) => ({
+          playerTag: p.playerTag,
+          name: p.name,
+          thLevel: p.thLevel,
+          leagueTier: p.leagueTier,
+          playedSoFar: 0,
+          // A windowed opt-out stays on the roster — it fights the rounds it can — so the constraint
+          // has to arrive here, or the fairness maths would plan it into a round it already declined
+          // and bench someone who was available in its place.
+          unavailableRounds: p.unavailable ? new Set(unavailableRounds(p.unavailable)) : undefined,
+        }));
 
       // Seed each account's rounds already fought, and treat those round numbers as locked.
       const played = roundsPlayedByAccount(rounds, members, sc.clanId);
@@ -93,6 +104,16 @@ export default function RotationPanel() {
                         ))}
                   </span>
                 </div>
+                {/* Named, not silently dropped: if the round comes up short of a full lineup, the
+                    leader needs to know which absence caused it and who to chase. */}
+                {rot.rounds[0].unavailable.length > 0 && (
+                  <div className="text-muted" style={{ fontSize: '0.7rem', marginTop: 4 }}>
+                    Unavailable: {rot.rounds[0].unavailable.map((s) => s.name).join(', ')}
+                    {rot.rounds[0].playing.length < rot.warSize && (
+                      <span className="text-warning"> · lineup short by {rot.warSize - rot.rounds[0].playing.length}</span>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Fairness summary — projected war days per player so leaders can see the balance. */}
@@ -105,6 +126,7 @@ export default function RotationPanel() {
                       <th style={th} title="Rounds already fought">Played</th>
                       <th style={th} title="Rounds we suggest they play next">Suggested</th>
                       <th style={th} title="Rounds we suggest they sit">Bench</th>
+                      <th style={th} title="Rounds they are marked unavailable for">Out</th>
                       <th style={th} title="Projected war days by season end">Total</th>
                     </tr>
                   </thead>
@@ -115,6 +137,9 @@ export default function RotationPanel() {
                         <td style={td}>{s.playedSoFar}</td>
                         <td style={td}>{s.suggestedPlays}</td>
                         <td style={{ ...td, color: s.benchRounds > 0 ? 'var(--color-muted)' : undefined }}>{s.benchRounds}</td>
+                        <td style={{ ...td, color: s.unavailableRounds > 0 ? 'var(--color-warning)' : 'var(--color-muted)' }}>
+                          {s.unavailableRounds || '—'}
+                        </td>
                         <td style={{ ...td, fontWeight: 600 }}>{s.projectedTotal}</td>
                       </tr>
                     ))}

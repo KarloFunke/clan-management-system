@@ -120,3 +120,48 @@ describe('roundsPlayedByAccount', () => {
     expect(roundsPlayedByAccount(rounds, members, 'A').get('#main')).toBe(1);
   });
 });
+
+describe('suggestClanRotation — per-round availability', () => {
+  const p = (tag: string, th: number, unavailable?: number[]) => ({
+    playerTag: tag,
+    name: tag,
+    thLevel: th,
+    leagueTier: null,
+    playedSoFar: 0,
+    unavailableRounds: unavailable ? new Set(unavailable) : undefined,
+  });
+
+  it('never plans an account into a round it is unavailable for', () => {
+    const rot = suggestClanRotation('c1', [p('#A', 16, [1, 2]), p('#B', 15), p('#C', 15)], 2);
+    const r1 = rot.rounds.find((r) => r.roundNumber === 1)!;
+    expect(r1.playing.map((s) => s.playerTag)).not.toContain('#A');
+    expect(r1.unavailable.map((s) => s.playerTag)).toEqual(['#A']);
+    // ...and is back in contention the moment the window closes.
+    const r3 = rot.rounds.find((r) => r.roundNumber === 3)!;
+    expect(r3.playing.map((s) => s.playerTag)).toContain('#A');
+  });
+
+  it('gives the freed slot to an available player rather than leaving it empty', () => {
+    // Two slots, three accounts, one of them out for round 1 — the other two both play.
+    const rot = suggestClanRotation('c1', [p('#A', 16, [1]), p('#B', 15), p('#C', 14)], 2);
+    const r1 = rot.rounds.find((r) => r.roundNumber === 1)!;
+    expect(r1.playing).toHaveLength(2);
+    expect(r1.bench).toHaveLength(0);
+  });
+
+  it('counts an unavailable round as out, not as a bench day', () => {
+    // Benching is a decision about a player who could have played; conflating the two would read as
+    // the rotation treating an absent account unfairly when it never had the choice.
+    const rot = suggestClanRotation('c1', [p('#A', 16, [1, 2]), p('#B', 15), p('#C', 15)], 2);
+    const a = rot.summary.find((s) => s.playerTag === '#A')!;
+    expect(a.unavailableRounds).toBe(2);
+    expect(a.benchRounds + a.suggestedPlays + a.unavailableRounds).toBe(rot.remainingRoundNumbers.length);
+  });
+
+  it('leaves the lineup short when too many are out, rather than fielding them anyway', () => {
+    const rot = suggestClanRotation('c1', [p('#A', 16, [1]), p('#B', 15, [1]), p('#C', 15)], 2);
+    const r1 = rot.rounds.find((r) => r.roundNumber === 1)!;
+    expect(r1.playing.map((s) => s.playerTag)).toEqual(['#C']);
+    expect(r1.unavailable).toHaveLength(2);
+  });
+});
