@@ -149,6 +149,23 @@ async function ingestClan(seasonId: string, clanId: string, clanTag: string): Pr
       if (memErr) console.error('CWL war members upsert failed:', memErr);
     }
 
+    // Is this read COMPLETE? A CWL war is always exactly teamSize a side — the game does not field a
+    // short roster — so a member list that comes back smaller is a partial read, not a lineup. That
+    // distinction is load-bearing twice over: a partial read would prune the missing rows (deleting
+    // real members, who then read as zero-attack bodies once the war ends — a missed-attack strike
+    // for a war they were in all along) and announce them as swapped out with nobody swapped in,
+    // which is the "swap out with no swap in" a leader sees on Discord and cannot act on.
+    //
+    // The upsert above still runs: everything we DID receive is current data and worth storing. Only
+    // the two destructive/announcing steps are skipped, and the next poll — reading a full list —
+    // handles it properly, including leaving the round unstamped so its reveal notice is not lost.
+    const fullRead = !war.teamSize || side.us.members.length >= war.teamSize;
+    if (!fullRead) {
+      console.warn(
+        `CWL partial member read for round ${roundNumber} (${clanTag}): ${side.us.members.length}/${war.teamSize} — skipping prune and swap notice`,
+      );
+    }
+
     // PRUNE anyone no longer in the war. The upsert only ever adds and updates, so before this a
     // swapped-out player kept their row forever: a 15v15 read back as 16 bodies, and — worse — once
     // the round ended that ghost row was a member with zero attacks in an ended war, which is
@@ -158,7 +175,7 @@ async function ingestClan(seasonId: string, clanId: string, clanTag: string): Pr
     const staleTags = previousFielded
       .filter((p) => !currentTags.some((t) => t.toUpperCase() === p.playerTag.toUpperCase()))
       .map((p) => p.playerTag);
-    if (staleTags.length) {
+    if (staleTags.length && fullRead) {
       const { error: delErr } = await supabase
         .from('cwl_war_members')
         .delete()
@@ -180,7 +197,7 @@ async function ingestClan(seasonId: string, clanId: string, clanTag: string): Pr
     // Announce the revealed lineup and how it differs from the formed roster. Runs after the member
     // rows are written so it reads the lineup this poll just landed; it no-ops for any round that is
     // not freshly revealed, and swallows its own failures (see notifyLineupIfRevealed).
-    await notifyLineupIfRevealed({
+    if (fullRead) await notifyLineupIfRevealed({
       seasonId,
       clanId,
       roundId: roundRow.id,
@@ -192,7 +209,7 @@ async function ingestClan(seasonId: string, clanId: string, clanTag: string): Pr
 
     // ...and, for a round already revealed on an earlier poll, whether the lineup has since CHANGED.
     // No-ops on the reveal poll itself (nothing to compare against) and outside preparation.
-    await recordLineupChange({
+    if (fullRead) await recordLineupChange({
       clanId,
       roundId: roundRow.id,
       roundNumber,

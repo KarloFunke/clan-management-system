@@ -585,10 +585,14 @@ export async function notifyRoundLineup(params: {
         diff.swappedIn
           .map((p, i) => {
             const who = swappedInMentions[i] ? `<@${swappedInMentions[i]}>` : `**${p.name}**`;
-            // Name the reason: a bench call-up is the roster working as designed, while an account
-            // the season never assigned here is a lineup the plan does not describe.
-            const why = p.reason === 'from_bench' ? 'from the bench' : 'not on this clan’s roster';
-            return `• ${who} (${p.playerTag}) — ${why}`;
+            // A bench call-up is worth naming — the roster working as designed. The other reason is
+            // NOT printed any more: signupReconcile.ts rewrites the plan from the in-game signup list
+            // every sync, so "not on this clan's roster" was reporting a gap that reconciliation had
+            // already closed. It read to the player as an accusation of being somewhere they should
+            // not be, about a lineup leadership themselves had just set.
+            return p.reason === 'from_bench'
+              ? `• ${who} (${p.playerTag}) — from the bench`
+              : `• ${who} (${p.playerTag})`;
           })
           .join('\n'),
       ),

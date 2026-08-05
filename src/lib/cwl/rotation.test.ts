@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { suggestClanRotation, roundsPlayedByAccount, TOTAL_ROUNDS } from './rotation';
+import { suggestClanRotation, roundsPlayedByAccount, performanceByAccount, TOTAL_ROUNDS } from './rotation';
 import type { CWLRound, CWLWarMember } from '@/types/database';
 import type { RotationPlayer } from './rotation';
 
@@ -163,5 +163,127 @@ describe('suggestClanRotation — per-round availability', () => {
     const r1 = rot.rounds.find((r) => r.roundNumber === 1)!;
     expect(r1.playing.map((s) => s.playerTag)).toEqual(['#C']);
     expect(r1.unavailable).toHaveLength(2);
+  });
+});
+
+describe('roundsPlayedByAccount — prep day is not a played round', () => {
+  it('ignores a round still in preparation', () => {
+    // The lineup is published at the start of prep day, so an appearance there is being PICKED, not
+    // having played. Counting it made the fairness maths think a war day had been spent.
+    const rounds: CWLRound[] = [
+      { ...round('r1', 'A', 1), state: 'warEnded' },
+      { ...round('r2', 'A', 2), state: 'preparation' },
+    ];
+    const members = [member('r1', '#main'), member('r2', '#main')];
+    expect(roundsPlayedByAccount(rounds, members, 'A').get('#main')).toBe(1);
+  });
+});
+
+describe('performanceByAccount', () => {
+  it('sums stars and attacks per ACCOUNT, not per person', () => {
+    const rounds = [round('r1', 'A', 1)];
+    const members = [
+      member('r1', '#main', { person_id: 'irfan', stars: 3, attacks_used: 1 }),
+      member('r1', '#alt', { person_id: 'irfan', stars: 1, attacks_used: 1 }),
+    ];
+    const perf = performanceByAccount(rounds, members, 'A');
+    expect(perf.get('#main')!.starsSoFar).toBe(3);
+    expect(perf.get('#alt')!.starsSoFar).toBe(1);
+  });
+
+  it('only counts a miss once the war has ended', () => {
+    const rounds: CWLRound[] = [
+      { ...round('r1', 'A', 1), state: 'warEnded' },
+      { ...round('r2', 'A', 2), state: 'inWar' },
+    ];
+    const members = [
+      member('r1', '#main', { attacks_used: 0, stars: 0 }),
+      member('r2', '#main', { attacks_used: 0, stars: 0 }),
+    ];
+    expect(performanceByAccount(rounds, members, 'A').get('#main')!.missedAttacks).toBe(1);
+  });
+});
+
+describe('suggestClanRotation — bonus condition and performance', () => {
+  const p = (tag: string, over: Partial<RotationPlayer> = {}): RotationPlayer =>
+    player(tag, { thLevel: 15, ...over });
+
+  it('keeps rounds-played the primary fairness signal, above the bonus chase', () => {
+    // #behind has played fewer rounds and is fully qualified; #ahead is chasing. Fairness still wins.
+    const rot = suggestClanRotation(
+      'c1',
+      [
+        p('#behind', { playedSoFar: 0, starsSoFar: 30, attacksUsed: 10 }),
+        p('#ahead', { playedSoFar: 3, starsSoFar: 0, attacksUsed: 0 }),
+      ],
+      1,
+      [],
+      7,
+      { minRounds: 4, minStars: 8 },
+    );
+    expect(rot.rounds[0].playing.map((s) => s.playerTag)).toEqual(['#behind']);
+  });
+
+  it('prefers the account still chasing the bonus when war days are equal', () => {
+    const rot = suggestClanRotation(
+      'c1',
+      [
+        p('#qualified', { playedSoFar: 2, starsSoFar: 20, attacksUsed: 7 }),
+        p('#chasing', { playedSoFar: 2, starsSoFar: 2, attacksUsed: 1 }),
+      ],
+      1,
+      [1, 2],
+      7,
+      { minRounds: 2, minStars: 8 },
+    );
+    expect(rot.rounds[0].playing.map((s) => s.playerTag)).toEqual(['#chasing']);
+  });
+
+  it('does not spend a slot on a bonus that can no longer be reached', () => {
+    // Two rounds left, so at most 6 more stars — #lost needs 9 and cannot get there. The slot goes to
+    // the account that still can, rather than chasing a bonus already gone.
+    const rot = suggestClanRotation(
+      'c1',
+      [
+        p('#lost', { playedSoFar: 2, starsSoFar: 0, attacksUsed: 2 }),
+        p('#reachable', { playedSoFar: 2, starsSoFar: 6, attacksUsed: 3 }),
+      ],
+      1,
+      [1, 2, 3, 4, 5],
+      7,
+      { minRounds: 1, minStars: 9 },
+    );
+    expect(rot.rounds[0].playing.map((s) => s.playerTag)).toEqual(['#reachable']);
+    expect(rot.summary.find((s) => s.playerTag === '#lost')!.bonusStatus).toBe('unreachable');
+  });
+
+  it('breaks a tie on performance — a missed attack outranks a better star rate', () => {
+    const rot = suggestClanRotation(
+      'c1',
+      [
+        p('#missed', { playedSoFar: 1, starsSoFar: 9, attacksUsed: 3, missedAttacks: 1 }),
+        p('#showed', { playedSoFar: 1, starsSoFar: 3, attacksUsed: 3, missedAttacks: 0 }),
+      ],
+      1,
+      [1, 2, 3, 4, 5, 6],
+      7,
+      { minRounds: 0, minStars: 0 }, // no bonus pressure — isolate the performance tiebreak
+    );
+    expect(rot.rounds[0].playing.map((s) => s.playerTag)).toEqual(['#showed']);
+  });
+
+  it('reports the shortfall against the projected season, not against today', () => {
+    const rot = suggestClanRotation(
+      'c1',
+      [p('#a', { playedSoFar: 0, starsSoFar: 8, attacksUsed: 3 })],
+      1,
+      [],
+      7,
+      { minRounds: 4, minStars: 8 },
+    );
+    const a = rot.summary[0];
+    expect(a.projectedTotal).toBe(7); // the plan already fields them every round
+    expect(a.roundsShort).toBe(0);
+    expect(a.bonusStatus).toBe('qualified');
   });
 });
