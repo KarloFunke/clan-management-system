@@ -560,6 +560,11 @@ function lateSnipeFields(params: {
  * Best-effort like every send here. Returns whether Discord accepted it, because the caller only
  * stamps `lineup_notified_at` on success — a failed post is retried on the next sync rather than
  * silently costing the round its notice.
+ *
+ * `basis` says what the lineup was compared AGAINST, and it changes the wording because it changes
+ * the meaning. Against the plan ('plan'), an absent starter really was swapped out. Against the
+ * previous round ('previous_round'), the two lists are a rotation — same war size in, same war size
+ * out — and calling a rested player "swapped out" overstates what happened to them.
  */
 export async function notifyRoundLineup(params: {
   clanName: string;
@@ -567,12 +572,15 @@ export async function notifyRoundLineup(params: {
   opponentName?: string | null;
   startTime?: string | null;
   diff: LineupDiff;
+  basis?: 'plan' | 'previous_round';
   // Discord ids for the swapped-IN accounts only, in the same order; null where the person has no
   // linked Discord (or the account has no person at all — a guest roster).
   swappedInMentions: (string | null)[];
   webhookUrl?: string | null;
 }): Promise<boolean> {
   const { clanName, roundNumber, opponentName, startTime, diff, swappedInMentions, webhookUrl } = params;
+  const basis = params.basis ?? 'plan';
+  const rotation = basis === 'previous_round';
 
   const mentionIds = swappedInMentions.filter((id): id is string => !!id);
 
@@ -580,7 +588,7 @@ export async function notifyRoundLineup(params: {
 
   if (diff.swappedIn.length) {
     fields.push({
-      name: `⬆️ Swapped in (${diff.swappedIn.length})`,
+      name: rotation ? `⬆️ Rotated in (${diff.swappedIn.length})` : `⬆️ Swapped in (${diff.swappedIn.length})`,
       value: truncateField(
         diff.swappedIn
           .map((p, i) => {
@@ -601,7 +609,7 @@ export async function notifyRoundLineup(params: {
 
   if (diff.swappedOut.length) {
     fields.push({
-      name: `⬇️ Swapped out (${diff.swappedOut.length})`,
+      name: rotation ? `⬇️ Resting this round (${diff.swappedOut.length})` : `⬇️ Swapped out (${diff.swappedOut.length})`,
       // Plain names, never mentions — see the doc block.
       value: truncateField(diff.swappedOut.map((p) => `• ${p.name} (${p.playerTag})`).join('\n')),
     });
@@ -609,7 +617,9 @@ export async function notifyRoundLineup(params: {
 
   fields.push({
     name: 'Lineup',
-    value: `**${diff.actualSize}** in the war · **${diff.asPlanned}** of **${diff.plannedSize}** planned starters fielded`,
+    value: rotation
+      ? `**${diff.actualSize}** in the war · **${diff.asPlanned}** unchanged from the last round`
+      : `**${diff.actualSize}** in the war · **${diff.asPlanned}** of **${diff.plannedSize}** planned starters fielded`,
     inline: false,
   });
 
@@ -618,7 +628,9 @@ export async function notifyRoundLineup(params: {
   }
 
   const title = diff.matchesPlan
-    ? `⚔️ Round ${roundNumber} — lineup matches the roster`
+    ? rotation
+      ? `⚔️ Round ${roundNumber} — same lineup as the last round`
+      : `⚔️ Round ${roundNumber} — lineup matches the roster`
     : `🔄 Round ${roundNumber} — lineup changed`;
 
   return sendDiscordMessage(

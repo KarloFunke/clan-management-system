@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase';
-import { diffLineup, type PlannedSlot, type ActualSlot } from './lineup';
+import { diffLineup, type PlannedSlot, type ActualSlot, type LineupDiff } from './lineup';
 import { diffFieldedLineups, type FieldedSlot } from './lineupChange';
 import { discordIdsForAccountTags, notifyLineupSwap, notifyRoundLineup, webhookUrlForClan } from '@/lib/discord';
 
@@ -29,6 +29,52 @@ type AllocationRow = {
 };
 
 type MemberRow = { player_tag: string; name: string | null; map_position: number | null };
+
+/**
+ * The most recent EARLIER round this clan actually fielded, if any. Walks backwards rather than
+ * taking round N-1 blindly: a round can exist with no member rows yet (revealed but not polled), and
+ * comparing against an empty lineup would report the entire war as rotated in.
+ */
+async function previousRoundLineup(
+  seasonId: string,
+  clanId: string,
+  roundNumber: number,
+): Promise<FieldedSlot[] | null> {
+  const { data: earlier } = await supabase
+    .from('cwl_rounds')
+    .select('id, round_number')
+    .eq('season_id', seasonId)
+    .eq('clan_id', clanId)
+    .lt('round_number', roundNumber)
+    .order('round_number', { ascending: false });
+
+  for (const r of (earlier as { id: string; round_number: number }[] | null) || []) {
+    const { data: members } = await supabase
+      .from('cwl_war_members')
+      .select('player_tag, name')
+      .eq('round_id', r.id);
+    const rows = (members as { player_tag: string; name: string | null }[] | null) || [];
+    if (rows.length) return rows.map((m) => ({ playerTag: m.player_tag, name: m.name || m.player_tag }));
+  }
+  return null;
+}
+
+/**
+ * Shape a rotation diff into the same LineupDiff the notice already renders. The swap-in `reason` is
+ * always 'unplanned' here: "from the bench" is a statement about the PLAN, and this comparison is
+ * not against the plan — a player rotating back in after a rest was never benched by anyone.
+ */
+function diffAgainstPreviousRound(previous: FieldedSlot[], actual: ActualSlot[]): LineupDiff {
+  const change = diffFieldedLineups(previous, actual.map((a) => ({ playerTag: a.playerTag, name: a.name })));
+  return {
+    swappedIn: change.swappedIn.map((s) => ({ ...s, reason: 'unplanned' as const })),
+    swappedOut: change.swappedOut,
+    asPlanned: actual.length - change.swappedIn.length, // carried over from the last round
+    plannedSize: previous.length,
+    actualSize: actual.length,
+    matchesPlan: !change.changed,
+  };
+}
 
 export async function notifyLineupIfRevealed(params: {
   seasonId: string;
@@ -79,7 +125,21 @@ export async function notifyLineupIfRevealed(params: {
     // next poll, once the roster is populated, still gets its notice.
     if (actual.length === 0) return;
 
-    const diff = diffLineup(planned, actual);
+    // WHAT to compare against. The plan is the right answer exactly once — for a clan's first
+    // revealed round, when the formed roster still describes a single lineup. After that it does
+    // not: signupReconcile.ts derives `is_bench` from "has appeared in any revealed lineup", which
+    // is cumulative, so by round 3 nearly the whole signed-up roster is flagged a starter. Diffing a
+    // 15-man war against 40 starters reported the entire rotating bench as "swapped out" every
+    // round, while a returning player — already a starter by that rule — never showed up as swapped
+    // in. That is the lopsided in/out count on Discord: not a detection bug, a comparison that had
+    // outlived its input.
+    //
+    // From the second revealed round the honest comparison is lineup-vs-lineup against the previous
+    // round, which is symmetric by construction (a CWL war is the same size every round, so a body
+    // in means a body out) and answers the question a leader actually has: who changed since last
+    // time. It is the same argument lineupChange.ts makes for mid-preparation swaps.
+    const prev = await previousRoundLineup(seasonId, clanId, roundNumber);
+    const diff = prev ? diffAgainstPreviousRound(prev, actual) : diffLineup(planned, actual);
 
     // Discord ids for the swapped-IN accounts only. Resolved account -> person -> discord_user_id in
     // one round trip; a null anywhere in that chain just means "name them, don't ping them".
@@ -97,6 +157,7 @@ export async function notifyLineupIfRevealed(params: {
       opponentName,
       startTime,
       diff,
+      basis: prev ? 'previous_round' : 'plan',
       swappedInMentions,
       webhookUrl: await webhookUrlForClan(clanId),
     });
