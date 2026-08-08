@@ -5,6 +5,7 @@ import { Swords, ChevronDown, ChevronRight, Star, ArrowUp, ArrowDown, Repeat } f
 import type { CWLLineupChangeEvent, CWLRound, CWLWarMember } from '@/types/database';
 import { useCWLStore } from '@/lib/stores/cwlStore';
 import { diffLineup, type LineupDiff } from '@/lib/cwl/lineup';
+import { countSwappedPositions } from '@/lib/cwl/lineupChange';
 import { useClanName } from './useClanName';
 import { useCwlScope } from './useCwlScope';
 import type { RosterPlayer } from './types';
@@ -127,6 +128,10 @@ export default function LiveRoundsPanel() {
               // Swaps made after the reveal. The plan is rewritten from the in-game signup list on
               // every sync, so the drift badge beside it cannot see these — only this log can.
               const swaps = r.lineup_changes || [];
+              // Counted in players, not in recorded events — several players swapped between two
+              // syncs land in one event, which made a collapsed round say "1 swap" and expand to
+              // three names. See countSwappedPositions.
+              const swapCount = countSwappedPositions(swaps.map((c) => ({ ...c, changed: true })));
               // Anyone brought in after the reveal is tagged in the lineup itself too, not just in
               // the log — the plan-based check above cannot flag them once the plan has caught up.
               const swappedInLate = new Set(swaps.flatMap((c) => c.swappedIn.map((p) => p.playerTag.toUpperCase())));
@@ -147,12 +152,12 @@ export default function LiveRoundsPanel() {
                       <span className="text-muted"> vs {r.opponent_name || '—'}</span>
                       <span className="text-muted" style={{ fontSize: '0.7rem', textTransform: 'uppercase', marginLeft: 6 }}>{STATE_LABEL[r.state] || r.state}</span>
                       {showDrift && <span style={{ marginLeft: 8 }}><LineupDrift diff={diff} /></span>}
-                      {swaps.length > 0 && (
+                      {swapCount > 0 && (
                         <span
                           title={`The lineup changed after it was revealed:\n${swapSummary(swaps)}`}
                           style={{ marginLeft: 8, display: 'inline-flex', alignItems: 'center', gap: 2, fontSize: '0.68rem', color: 'var(--color-warning)', fontWeight: 700 }}
                         >
-                          <Repeat size={11} />{swaps.length} swap{swaps.length === 1 ? '' : 's'}
+                          <Repeat size={11} />{swapCount} swap{swapCount === 1 ? '' : 's'}
                         </span>
                       )}
                     </span>
@@ -188,7 +193,10 @@ export default function LiveRoundsPanel() {
                         const tagKey = m.player_tag.toUpperCase();
                         const swappedIn = swappedInTags.has(tagKey) || swappedInLate.has(tagKey);
                         return (
-                          <div key={m.id} style={{ display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', gap: 'var(--space-sm)', fontSize: '0.8rem' }}>
+                          // Name left, result right, with a dotted leader bridging them — a 15-name
+                          // list of two far-apart columns is hard to read across, and the leader is
+                          // the table-of-contents trick for exactly that.
+                          <div key={m.id} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, auto) minmax(16px, 1fr) auto', alignItems: 'center', gap: 'var(--space-xs)', fontSize: '0.8rem' }}>
                             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                               <span className="text-muted" style={{ fontVariantNumeric: 'tabular-nums' }}>{m.map_position ?? '—'}. </span>
                               {m.name || m.player_tag}
@@ -202,6 +210,7 @@ export default function LiveRoundsPanel() {
                                 </span>
                               )}
                             </span>
+                            <span aria-hidden style={{ borderBottom: '1px dotted rgba(148, 163, 184, 0.3)', transform: 'translateY(-2px)' }} />
                             {missed ? (
                               <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--color-danger)', letterSpacing: '0.04em' }}>MISSED</span>
                             ) : (

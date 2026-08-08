@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { diffFieldedLineups, type FieldedSlot } from './lineupChange';
+import { countSwappedPositions, diffFieldedLineups, type FieldedSlot } from './lineupChange';
 
 const slot = (tag: string, name = tag): FieldedSlot => ({ playerTag: tag, name });
 
@@ -40,5 +40,37 @@ describe('diffFieldedLineups', () => {
     const d = diffFieldedLineups([slot('#A'), slot('#B')], []);
     expect(d.swappedOut.map((s) => s.playerTag)).toEqual(['#A', '#B']);
     expect(d.swappedIn).toHaveLength(0);
+  });
+});
+
+// The round card counts swaps in PLAYERS, not in recorded events — the event boundary is just how
+// often the poller happened to look.
+describe('countSwappedPositions', () => {
+  const ev = (inTags: string[], outTags: string[]) => ({
+    swappedIn: inTags.map((t) => slot(t)),
+    swappedOut: outTags.map((t) => slot(t)),
+    changed: true,
+  });
+
+  it('counts three players swapped in one event as three, not one', () => {
+    expect(countSwappedPositions([ev(['#X', '#Y', '#Z'], ['#A', '#B', '#C'])])).toBe(3);
+  });
+
+  it('adds up players across separate events', () => {
+    expect(countSwappedPositions([ev(['#X'], ['#A']), ev(['#Y'], ['#B'])])).toBe(2);
+  });
+
+  it('takes the larger side when the lineup grew or shrank', () => {
+    expect(countSwappedPositions([ev(['#X', '#Y'], ['#A'])])).toBe(2);
+    expect(countSwappedPositions([ev(['#X'], ['#A', '#B'])])).toBe(2);
+  });
+
+  it('cancels a player swapped out and later brought back', () => {
+    // One position churned, not two — and the roster ends where it started for them.
+    expect(countSwappedPositions([ev([], ['#A']), ev(['#A'], [])])).toBe(0);
+  });
+
+  it('is zero for no events', () => {
+    expect(countSwappedPositions([])).toBe(0);
   });
 });

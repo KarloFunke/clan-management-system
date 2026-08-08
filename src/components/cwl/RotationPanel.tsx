@@ -13,7 +13,7 @@ import {
 } from '@/lib/cwl/rotation';
 import { useClanName } from './useClanName';
 import { useCwlScope } from './useCwlScope';
-import { unavailableRounds } from '@/lib/cwl/availability';
+import { isFullSeason, unavailableRounds } from '@/lib/cwl/availability';
 
 const th: React.CSSProperties = { textAlign: 'right', padding: '5px 8px', fontSize: '0.66rem', textTransform: 'uppercase', color: 'var(--color-muted)', whiteSpace: 'nowrap' };
 const td: React.CSSProperties = { textAlign: 'right', padding: '5px 8px', fontSize: '0.82rem', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' };
@@ -49,8 +49,17 @@ export default function RotationPanel() {
     // a pure filter — no clan's suggestion depends on another's.
     return seasonClans.filter((sc) => scope.includes(sc.clanId)).map((sc) => {
       // The signed roster for this clan (recommended there, not removed from the season).
+      //
+      // A FULL-season opt-out is dropped outright rather than carried as a constraint. The engine
+      // already excludes those when it allocates, but a row can still be sitting on this clan two
+      // ways: the leader marked the account after the roster was formed (opt_out does not delete the
+      // allocation), or signupReconcile put it back because the game says it signed up. Either way
+      // there is no round for it to play, so it added a row of all-zeros and a full column of Out to
+      // every clan's fairness table — noise in the one view whose job is "who sits next". A PARTIAL
+      // opt-out stays: it fights the rounds it can, and its constraint is handed to the engine below.
       const roster = players
         .filter((p) => p.recommendedClanId === sc.clanId && p.status !== 'removed')
+        .filter((p) => !(p.unavailable && isFullSeason(p.unavailable)))
         .map((p) => ({
           playerTag: p.playerTag,
           name: p.name,

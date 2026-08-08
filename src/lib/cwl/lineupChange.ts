@@ -49,3 +49,31 @@ export function diffFieldedLineups(previous: FieldedSlot[], current: FieldedSlot
 
   return { swappedIn, swappedOut, changed: swappedIn.length > 0 || swappedOut.length > 0 };
 }
+
+/**
+ * How many lineup changes a round's recorded history amounts to, counted in PLAYERS rather than in
+ * recorded events.
+ *
+ * The round card badge used to print the length of `lineup_changes`, which is the number of times a
+ * poll happened to notice a difference — not the number of changes a leader made. Three players
+ * swapped between two syncs land in one event, so a collapsed round read "1 swap" and expanded to
+ * three names. The event boundary is an artefact of polling frequency and means nothing to anyone.
+ *
+ * A swap is one body out and one body in, but which out pairs with which in is unknowable from a
+ * membership diff — so this counts POSITIONS changed: the larger side of the two. It also dedupes by
+ * tag across events, because a player swapped out and later brought back is one position that
+ * churned, not two.
+ */
+export function countSwappedPositions(events: readonly LineupChange[]): number {
+  const inTags = new Set<string>();
+  const outTags = new Set<string>();
+  for (const e of events) {
+    for (const s of e.swappedIn) inTags.add(key(s.playerTag));
+    for (const s of e.swappedOut) outTags.add(key(s.playerTag));
+  }
+  // An account that went out and came back is not a net change on either side.
+  for (const tag of Array.from(inTags)) {
+    if (outTags.has(tag)) { inTags.delete(tag); outTags.delete(tag); }
+  }
+  return Math.max(inTags.size, outTags.size);
+}
