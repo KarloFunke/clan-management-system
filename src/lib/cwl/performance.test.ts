@@ -49,6 +49,26 @@ describe('computeSeasonPerformance', () => {
     expect(bob.avgDestruction).toBeNull();
   });
 
+  it('keeps a person\'s alts as separate rows', () => {
+    // CWL sign-up is per account, so each alt fights its own war. Collapsing them under the person
+    // produced a row true of nobody — 2 rounds and both star totals credited to one "member".
+    const rounds = [round('r1', 'warEnded'), round('r2', 'warEnded')];
+    const members = [
+      member('r1', { person_id: 'p1', player_tag: '#MAIN', name: 'Ann', attacks_used: 1, stars: 3, destruction: 100 }),
+      member('r2', { person_id: 'p1', player_tag: '#ALT', name: 'Ann Alt', attacks_used: 1, stars: 2, destruction: 80 }),
+    ];
+    const { perMember } = computeSeasonPerformance(rounds, members);
+    expect(perMember).toHaveLength(2);
+    const main = perMember.find((m) => m.playerTag === '#MAIN')!;
+    const alt = perMember.find((m) => m.playerTag === '#ALT')!;
+    expect(main.roundsPlayed).toBe(1);
+    expect(main.totalStars).toBe(3);
+    expect(alt.roundsPlayed).toBe(1);
+    expect(alt.totalStars).toBe(2);
+    // Still linked back to the person, just not merged into it.
+    expect(alt.personId).toBe('p1');
+  });
+
   it('groups unlinked tags separately and rolls family totals up', () => {
     const rounds = [round('r1', 'warEnded')];
     const members = [

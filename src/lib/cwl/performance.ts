@@ -14,14 +14,20 @@ import type { CWLRound, CWLWarMember } from '@/types/database';
  * The lineup is published at the start of prep day, so counting appearances alone credited everyone
  * with a round they had not yet played — on prep day the column filled with 1s, 2s and 3s before a
  * single attack existed. Being picked is not the same as playing.
+ *
+ * Rows are keyed PER ACCOUNT, not per person. CWL sign-up is per account (migration 026) — a
+ * person's alts are rostered, benched and struck independently — so collapsing them here produced a
+ * row that was true of nobody: two alts each fighting all seven rounds read as 14 rounds played and
+ * both their star totals under one name, which is what made the table look absurd. Each account
+ * plays its own war; `personId` is still carried so the UI can group or link back to the person.
  */
 
 export interface MemberPerf {
-  key: string;             // person_id when linked, else player_tag (grouping key)
+  key: string;             // player_tag — one row per ACCOUNT, see the header note
   personId: string | null;
   playerTag: string | null;
   name: string;
-  thLevel: number | null;  // highest TH seen for the member across the season's lineups
+  thLevel: number | null;  // highest TH seen for the account across the season's lineups
   roundsPlayed: number;    // distinct rounds reaching battle day that the member was fielded in
   attacksUsed: number;
   totalStars: number;
@@ -53,7 +59,7 @@ export function computeSeasonPerformance(rounds: CWLRound[], members: CWLWarMemb
   // Prep day is not a played round — see the header note.
   const playedRoundIds = new Set(rounds.filter((r) => r.state === 'inWar' || r.state === 'warEnded').map((r) => r.id));
 
-  // Accumulate per member, keyed by person (linked) or tag (unlinked/guest).
+  // Accumulate per ACCOUNT — see the header note on why this is not keyed by person.
   type Acc = MemberPerf & { destructionSum: number; roundIds: Set<string> };
   const byKey = new Map<string, Acc>();
 
@@ -73,10 +79,10 @@ export function computeSeasonPerformance(rounds: CWLRound[], members: CWLWarMemb
 
   for (const m of members) {
     if (!inScope.has(m.round_id)) continue;
-    const key = m.person_id ?? m.player_tag;
+    const key = m.player_tag;
     const acc = ensure(key, { personId: m.person_id, playerTag: m.player_tag, name: m.name || m.player_tag });
-    // A member can upgrade mid-season and alts group under one person key, so keep the highest TH —
-    // it is what a leader sorts by when reading the table as "how did our big accounts do".
+    // An account can upgrade mid-season, so keep the highest TH — it is what a leader sorts by when
+    // reading the table as "how did our big accounts do".
     if (m.th_level !== null && m.th_level > (acc.thLevel ?? 0)) acc.thLevel = m.th_level;
     if (playedRoundIds.has(m.round_id)) acc.roundIds.add(m.round_id);
     acc.attacksUsed += m.attacks_used;
