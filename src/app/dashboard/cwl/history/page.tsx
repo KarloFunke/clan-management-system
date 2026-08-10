@@ -29,14 +29,11 @@ export default function CWLHistoryPage() {
           const { data: memberRows } = await supabase.from('cwl_war_members').select('*').in('round_id', rounds.map((r) => r.id));
           members = (memberRows as CWLWarMember[]) || [];
 
-          // Prefer the family person's display name over the raw in-game name for linked accounts
-          // (same resolution as SeasonView).
-          const personIds = Array.from(new Set(members.map((m) => m.person_id).filter((x): x is string => !!x)));
-          if (personIds.length) {
-            const { data: personRows } = await supabase.from('persons').select('id, display_name').in('id', personIds);
-            const nameById = new Map((personRows as { id: string; display_name: string }[] | null || []).map((p) => [p.id, p.display_name]));
-            members = members.map((m) => ({ ...m, name: (m.person_id && nameById.get(m.person_id)) || m.name }));
-          }
+          // The in-game ACCOUNT name is left alone. This used to overwrite it with the linked
+          // person's display name, which read fine while the career table merged a person's alts
+          // into one row — but the table is now one row per account, and the override made every
+          // alt of a person carry the same name, three identical-looking rows distinguishable only
+          // by tag. The account name is the identity of the thing each row is actually counting.
         }
       }
 
