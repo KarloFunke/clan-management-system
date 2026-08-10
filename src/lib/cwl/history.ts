@@ -3,23 +3,30 @@ import type { CWLSeason, CWLRound, CWLWarMember } from '@/types/database';
 /**
  * CWL cross-season history roll-up (Phase 3).
  *
- * Aggregates every season's stored rounds/war-members into a per-person CAREER record and a
+ * Aggregates every season's stored rounds/war-members into a per-ACCOUNT career record and a
  * per-season family trend. Pure and side-effect free so the math is testable and the components
  * stay thin — mirrors src/lib/cwl/performance.ts (which does the same for a single season).
  *
- * Grouping and the "missed attack" rule match performance.ts: a member is keyed by person_id when
- * linked else player_tag, and a miss only counts once its round has ENDED (state === 'warEnded')
- * with no attack used. seasonsMissedIn counts DISTINCT seasons a person missed in — two misses in
- * one season is still one season — which is the signal that separates a repeat offender from an
- * unlucky one-off.
+ * Grouping and the "missed attack" rule match performance.ts: a row is keyed by `player_tag`, and a
+ * miss only counts once its round has ENDED (state === 'warEnded') with no attack used.
+ *
+ * Keying by person_id when linked is what this used to do, and it produced a career line true of
+ * nobody: CWL sign-up is per account throughout — allocation, bench, rotation, strikes — so two
+ * alts each warring all seven rounds read as 14 rounds under one name, with both star totals and
+ * both miss counts merged. That is worse in the miss columns than the star ones, since a clean main
+ * averaged together with a delinquent alt leaves neither record legible, and the repeat-misser list
+ * is read as a leadership signal. `personId` is still carried per row for linking back.
+ *
+ * seasonsMissedIn counts DISTINCT seasons an account missed in — two misses in one season is still
+ * one season — which is the signal that separates a repeat offender from an unlucky one-off.
  */
 
 export interface CareerStat {
-  key: string;                    // person_id when linked, else player_tag
+  key: string;                    // player_tag — one row per ACCOUNT, see the header note
   personId: string | null;
   playerTag: string | null;
   name: string;
-  seasonsPlayed: number;          // distinct seasons the person appeared in a lineup
+  seasonsPlayed: number;          // distinct seasons the account appeared in a lineup
   roundsPlayed: number;           // distinct rounds across all seasons
   attacksUsed: number;
   totalStars: number;
@@ -34,11 +41,16 @@ export interface SeasonTrendPoint {
   seasonId: string;
   label: string;
   starsPerAttack: number | null;  // family total stars / attacks used that season
-  participants: number;           // distinct members fielded that season
+  /**
+   * Distinct ACCOUNTS fielded that season. Follows the same key as the career rows, which is also
+   * the number a leader means by "how many did we field" — two alts occupy two war slots.
+   */
+  participants: number;
 }
 
 export interface CareerHistory {
-  perPerson: CareerStat[];
+  /** One row per account. Named for what it is — it was `perPerson` while it merged alts. */
+  perAccount: CareerStat[];
   trend: SeasonTrendPoint[];
   repeatMissers: CareerStat[];
   totalSeasonsWithData: number;
@@ -84,7 +96,8 @@ export function computeCareerStats(
   for (const m of members) {
     const seasonId = roundSeason.get(m.round_id);
     if (!seasonId) continue; // orphan member (round not in the fetched set) — skip defensively
-    const key = m.person_id ?? m.player_tag;
+    // Per account — a person's alts each fight their own war. See the header note.
+    const key = m.player_tag;
 
     let acc = byKey.get(key);
     if (!acc) {
@@ -121,7 +134,7 @@ export function computeCareerStats(
 
   const totalSeasonsWithData = seasonsWithData.size;
 
-  const perPerson: CareerStat[] = Array.from(byKey.values())
+  const perAccount: CareerStat[] = Array.from(byKey.values())
     .map((acc): CareerStat => {
       const expected = acc.attacksUsed + acc.missed;
       return {
@@ -142,7 +155,7 @@ export function computeCareerStats(
     })
     .sort((a, b) => b.totalStars - a.totalStars);
 
-  const repeatMissers = perPerson
+  const repeatMissers = perAccount
     .filter((p) => p.seasonsMissedIn >= 2)
     .sort((a, b) => b.seasonsMissedIn - a.seasonsMissedIn || b.missed - a.missed);
 
@@ -161,5 +174,5 @@ export function computeCareerStats(
       };
     });
 
-  return { perPerson, trend, repeatMissers, totalSeasonsWithData };
+  return { perAccount, trend, repeatMissers, totalSeasonsWithData };
 }

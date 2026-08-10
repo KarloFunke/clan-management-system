@@ -54,7 +54,7 @@ export default function CWLHistoryPage() {
     load();
   }, [load]);
 
-  const hasData = history && history.perPerson.length > 0;
+  const hasData = history && history.perAccount.length > 0;
 
   return (
     <div>

@@ -30,18 +30,54 @@ describe('computeCareerStats', () => {
       // Bob only plays s1 -> attendance 1/2.
       member('s1r1', { person_id: 'p2', player_tag: '#B', name: 'Bob', attacks_used: 1, stars: 1, destruction: 50 }),
     ];
-    const { perPerson, totalSeasonsWithData } = computeCareerStats(seasons, rounds, members);
+    const { perAccount, totalSeasonsWithData } = computeCareerStats(seasons, rounds, members);
     expect(totalSeasonsWithData).toBe(2);
-    const ann = perPerson.find((p) => p.personId === 'p1')!;
+    const ann = perAccount.find((p) => p.personId === 'p1')!;
     expect(ann.seasonsPlayed).toBe(2);
     expect(ann.attendanceRate).toBeCloseTo(1);
     expect(ann.attacksUsed).toBe(2);
     expect(ann.totalStars).toBe(5);
     expect(ann.avgDestruction).toBeCloseTo(90);
     expect(ann.missed).toBe(0);
-    const bob = perPerson.find((p) => p.personId === 'p2')!;
+    const bob = perAccount.find((p) => p.personId === 'p2')!;
     expect(bob.seasonsPlayed).toBe(1);
     expect(bob.attendanceRate).toBeCloseTo(0.5);
+  });
+
+  it('keeps a person\'s alts as separate career rows', () => {
+    // CWL sign-up is per account, so each alt fights its own war. Merging them under the person
+    // gave one line true of nobody — two seasons' worth of rounds and both records under one name.
+    const seasons = [season('s1', 'Jan', '2026-01-01')];
+    const rounds = [round('s1r1', 's1', 'warEnded'), round('s1r2', 's1', 'warEnded')];
+    const members = [
+      member('s1r1', { person_id: 'p1', player_tag: '#MAIN', name: 'Ann', attacks_used: 1, stars: 3, destruction: 100 }),
+      // The alt missed — a fact the merged row buried under the main's clean record.
+      member('s1r2', { person_id: 'p1', player_tag: '#ALT', name: 'Ann Alt', attacks_used: 0 }),
+    ];
+    const { perAccount } = computeCareerStats(seasons, rounds, members);
+    expect(perAccount).toHaveLength(2);
+    const main = perAccount.find((p) => p.playerTag === '#MAIN')!;
+    const alt = perAccount.find((p) => p.playerTag === '#ALT')!;
+    expect(main.roundsPlayed).toBe(1);
+    expect(main.totalStars).toBe(3);
+    expect(main.missed).toBe(0);
+    expect(alt.roundsPlayed).toBe(1);
+    expect(alt.missed).toBe(1);
+    // Still linked back to the person, just not merged into it.
+    expect(alt.personId).toBe('p1');
+  });
+
+  it('flags an alt as a repeat misser without dragging in its clean main', () => {
+    const seasons = [season('s1', 'Jan', '2026-01-01'), season('s2', 'Feb', '2026-02-01')];
+    const rounds = [round('s1r1', 's1', 'warEnded'), round('s2r1', 's2', 'warEnded')];
+    const members = [
+      member('s1r1', { person_id: 'p1', player_tag: '#MAIN', name: 'Ann', attacks_used: 1, stars: 3, destruction: 100 }),
+      member('s2r1', { person_id: 'p1', player_tag: '#MAIN', name: 'Ann', attacks_used: 1, stars: 2, destruction: 80 }),
+      member('s1r1', { person_id: 'p1', player_tag: '#ALT', name: 'Ann Alt', attacks_used: 0 }),
+      member('s2r1', { person_id: 'p1', player_tag: '#ALT', name: 'Ann Alt', attacks_used: 0 }),
+    ];
+    const { repeatMissers } = computeCareerStats(seasons, rounds, members);
+    expect(repeatMissers.map((p) => p.playerTag)).toEqual(['#ALT']);
   });
 
   it('counts seasonsMissedIn as distinct seasons and gates on warEnded', () => {
@@ -60,8 +96,8 @@ describe('computeCareerStats', () => {
       // s3 is live -> no miss counted.
       member('s3r1', { person_id: 'p1', player_tag: '#A', name: 'Ann', attacks_used: 0 }),
     ];
-    const { perPerson } = computeCareerStats(seasons, rounds, members);
-    const ann = perPerson.find((p) => p.personId === 'p1')!;
+    const { perAccount } = computeCareerStats(seasons, rounds, members);
+    const ann = perAccount.find((p) => p.personId === 'p1')!;
     expect(ann.missed).toBe(3);          // 2 in s1 + 1 in s2, s3 excluded
     expect(ann.seasonsMissedIn).toBe(2); // distinct seasons
     expect(ann.missedRate).toBeCloseTo(1); // 3 missed / 3 expected (attacksUsed 0)
@@ -106,10 +142,10 @@ describe('computeCareerStats', () => {
     const members = [
       member('s1r1', { person_id: null, player_tag: '#guest', name: 'Guest', attacks_used: 0 }),
     ];
-    const { perPerson, totalSeasonsWithData, trend } = computeCareerStats(seasons, rounds, members);
+    const { perAccount, totalSeasonsWithData, trend } = computeCareerStats(seasons, rounds, members);
     expect(totalSeasonsWithData).toBe(1);
     expect(trend).toHaveLength(1);
-    const guest = perPerson.find((p) => p.playerTag === '#guest')!;
+    const guest = perAccount.find((p) => p.playerTag === '#guest')!;
     expect(guest.personId).toBeNull();
     expect(guest.missed).toBe(1);
     expect(guest.attendanceRate).toBeCloseTo(1); // played the only season with data

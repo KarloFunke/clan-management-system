@@ -24,13 +24,13 @@ const td: React.CSSProperties = { textAlign: 'right', padding: '6px 10px', fontS
 const dash = (n: number | null, suffix = '') => (n === null ? '—' : `${n.toFixed(1)}${suffix}`);
 const pct = (n: number) => `${Math.round(n * 100)}%`;
 
-/** Cross-season CWL history: family trends, repeat missed-attackers, and a per-person career table. */
+/** Cross-season CWL history: family trends, repeat missed-attackers, and a per-account career table. */
 export default function HistoryView({ history }: { history: CareerHistory }) {
-  const { perPerson, trend, repeatMissers, totalSeasonsWithData } = history;
+  const { perAccount, trend, repeatMissers, totalSeasonsWithData } = history;
   const [sort, setSort] = useState<SortKey>('totalStars');
 
   const sorted = useMemo(() => {
-    const rows = perPerson.slice();
+    const rows = perAccount.slice();
     rows.sort((a, b) => {
       if (sort === 'name') return a.name.localeCompare(b.name);
       const av = (a[sort] as number | null) ?? -1;
@@ -38,12 +38,12 @@ export default function HistoryView({ history }: { history: CareerHistory }) {
       return bv - av;
     });
     return rows;
-  }, [perPerson, sort]);
+  }, [perAccount, sort]);
 
   const repeatKeys = useMemo(() => new Set(repeatMissers.map((p) => p.key)), [repeatMissers]);
 
   const starsSeries: ChartSeries[] = [{ label: 'Stars per attack', color: STARS_COLOR, points: trend.map((t) => ({ x: t.label, y: t.starsPerAttack ?? 0 })), fill: true }];
-  const participantsSeries: ChartSeries[] = [{ label: 'Members fielded', color: PARTICIPANTS_COLOR, points: trend.map((t) => ({ x: t.label, y: t.participants })), fill: true }];
+  const participantsSeries: ChartSeries[] = [{ label: 'Accounts fielded', color: PARTICIPANTS_COLOR, points: trend.map((t) => ({ x: t.label, y: t.participants })), fill: true }];
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-lg)' }}>
@@ -65,8 +65,8 @@ export default function HistoryView({ history }: { history: CareerHistory }) {
               <LineChart series={starsSeries} granularityLabel="Per season" height={220} ariaSummary="Average stars per CWL attack across seasons, oldest to newest." />
             </div>
             <div>
-              <div className="text-muted" style={{ fontSize: '0.72rem', textTransform: 'uppercase', marginBottom: 4 }}>Members fielded</div>
-              <LineChart series={participantsSeries} granularityLabel="Per season" height={220} ariaSummary="Distinct members fielded in CWL across seasons, oldest to newest." />
+              <div className="text-muted" style={{ fontSize: '0.72rem', textTransform: 'uppercase', marginBottom: 4 }}>Accounts fielded</div>
+              <LineChart series={participantsSeries} granularityLabel="Per season" height={220} ariaSummary="Distinct accounts fielded in CWL across seasons, oldest to newest." />
             </div>
           </div>
         )}
@@ -78,7 +78,7 @@ export default function HistoryView({ history }: { history: CareerHistory }) {
           <AlertTriangle size={16} style={{ color: 'var(--color-danger)' }} />
           <div>
             <h3 style={{ fontSize: '0.95rem', margin: 0 }}>Repeat Missed-Attackers</h3>
-            <p className="text-muted" style={{ fontSize: '0.72rem', margin: '2px 0 0' }}>Members who missed attacks in more than one season.</p>
+            <p className="text-muted" style={{ fontSize: '0.72rem', margin: '2px 0 0' }}>Accounts that missed attacks in more than one season.</p>
           </div>
         </div>
         {repeatMissers.length === 0 ? (
@@ -87,7 +87,10 @@ export default function HistoryView({ history }: { history: CareerHistory }) {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-xs)' }}>
             {repeatMissers.map((p) => (
               <div key={p.key} style={{ display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', gap: 'var(--space-sm)', padding: '6px 8px', borderRadius: 'var(--radius-md)', background: 'rgba(248,113,113,0.06)' }}>
-                <span style={{ fontSize: '0.85rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
+                <span style={{ fontSize: '0.85rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {p.name}
+                  {p.playerTag && <span className="text-muted" style={{ fontSize: '0.68rem', marginLeft: 6 }}>{p.playerTag}</span>}
+                </span>
                 <span style={{ fontSize: '0.78rem', fontVariantNumeric: 'tabular-nums', color: 'var(--color-danger)', fontWeight: 600, whiteSpace: 'nowrap' }}>
                   missed in {p.seasonsMissedIn} seasons · {p.missed} total
                 </span>
@@ -104,7 +107,7 @@ export default function HistoryView({ history }: { history: CareerHistory }) {
             <BarChart3 size={16} className="text-cta" />
             <div>
               <h3 style={{ fontSize: '0.95rem', margin: 0 }}>Career Record</h3>
-              <p className="text-muted" style={{ fontSize: '0.72rem', margin: '2px 0 0' }}>Every member's CWL history across all seasons — recognition, not a ranking.</p>
+              <p className="text-muted" style={{ fontSize: '0.72rem', margin: '2px 0 0' }}>Every account's CWL history across all seasons — one row per account, since alts war separately. Recognition, not a ranking.</p>
             </div>
           </div>
           <select className="input" style={{ width: 'auto', padding: '6px 10px' }} value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
@@ -112,7 +115,7 @@ export default function HistoryView({ history }: { history: CareerHistory }) {
           </select>
         </div>
 
-        {perPerson.length === 0 ? (
+        {perAccount.length === 0 ? (
           <div style={{ textAlign: 'center', padding: 'var(--space-lg)' }}>
             <Users size={24} className="text-muted" style={{ marginBottom: 'var(--space-sm)' }} />
             <p className="text-muted" style={{ fontSize: '0.85rem', margin: 0 }}>No career data yet — history appears after your first synced season.</p>
@@ -138,7 +141,12 @@ export default function HistoryView({ history }: { history: CareerHistory }) {
                   const flagged = repeatKeys.has(m.key);
                   return (
                     <tr key={m.key} style={{ borderTop: '1px solid rgba(255,255,255,0.04)' }}>
-                      <td style={{ ...td, textAlign: 'left', fontWeight: 500 }}>{m.name}</td>
+                      {/* Tag alongside the name: rows are per account, and a person's alts often
+                          carry near-identical names — without it two rows read as a duplicate. */}
+                      <td style={{ ...td, textAlign: 'left', fontWeight: 500 }}>
+                        {m.name}
+                        {m.playerTag && <span className="text-muted" style={{ fontSize: '0.68rem', marginLeft: 6 }}>{m.playerTag}</span>}
+                      </td>
                       <td style={td}>{m.seasonsPlayed}</td>
                       <td style={td}>{pct(m.attendanceRate)}</td>
                       <td style={td}>{m.roundsPlayed}</td>
