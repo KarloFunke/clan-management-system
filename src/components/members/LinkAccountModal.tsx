@@ -1,16 +1,15 @@
 'use client';
 
 import { useState } from 'react';
-import { Search, X, Check, Baby } from 'lucide-react';
+import { Search, X, Check } from 'lucide-react';
 import { useMembersStore, type AccountWithClan } from '@/lib/stores/membersStore';
 
 // Assigns an unlinked account to a person — either an existing entry (alt link) or a brand-new
-// person (optionally a baby with an opening note). Form state is local; the person list, the
-// trial-window copy, the linking guard, and the link action all come from the store. On success
+// person. Form state is local; the person list, the linking guard, and the link action all come
+// from the store. On success
 // the store splices the result in and this modal closes.
 export default function LinkAccountModal({ account, onClose }: { account: AccountWithClan; onClose: () => void }) {
   const members = useMembersStore((s) => s.members);
-  const babyTrialDays = useMembersStore((s) => s.babyTrialDays);
   const linking = useMembersStore((s) => s.linking);
   const linkAccount = useMembersStore((s) => s.linkAccount);
 
@@ -18,8 +17,6 @@ export default function LinkAccountModal({ account, onClose }: { account: Accoun
   const [linkSearch, setLinkSearch] = useState('');
   const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
   const [newPersonName, setNewPersonName] = useState(account.in_game_name);
-  const [newPersonIsBaby, setNewPersonIsBaby] = useState(false);
-  const [newPersonComment, setNewPersonComment] = useState('');
 
   const linkablePersons = members.filter((m) => m.display_name.toLowerCase().includes(linkSearch.toLowerCase()));
 
@@ -31,8 +28,6 @@ export default function LinkAccountModal({ account, onClose }: { account: Accoun
       playerTag: account.player_tag,
       personId: tab === 'existing' ? selectedPersonId : null,
       newPersonName: tab === 'new' ? newPersonName : null,
-      isBaby: tab === 'new' ? newPersonIsBaby : false,
-      comment: tab === 'new' && newPersonIsBaby ? newPersonComment : null,
     });
     if (ok) onClose();
   }
@@ -88,31 +83,6 @@ export default function LinkAccountModal({ account, onClose }: { account: Accoun
               <p className="text-muted" style={{ fontSize: '0.75rem', marginTop: 'var(--space-md)' }}>
                 This creates a new &quot;Human&quot; record. You can link other alts to this name later.
               </p>
-
-              <label className="switch-row" style={{ marginTop: 'var(--space-lg)' }}>
-                <span className="switch" data-on={newPersonIsBaby}>
-                  <input type="checkbox" checked={newPersonIsBaby} onChange={(e) => setNewPersonIsBaby(e.target.checked)} />
-                  <span className="switch-knob" />
-                </span>
-                <span>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: '600', fontSize: '0.85rem' }}>
-                    <Baby size={15} className="text-warning" /> Mark as Baby
-                  </span>
-                  <span className="text-muted" style={{ fontSize: '0.72rem' }}>
-                    Starts a {babyTrialDays}-day trial. Promote before it ends or the link is auto-removed.
-                  </span>
-                </span>
-              </label>
-
-              {newPersonIsBaby && (
-                <div style={{ marginTop: 'var(--space-md)' }}>
-                  <label style={{ display: 'block', fontSize: '0.7rem', fontWeight: '700', textTransform: 'uppercase', color: 'var(--color-muted)', marginBottom: '8px' }}>Initial Note <span style={{ textTransform: 'none', fontWeight: '400' }}>(optional)</span></label>
-                  <textarea className="input" rows={3} placeholder="Why are we trialing them? Anything to watch during the trial..." value={newPersonComment} onChange={(e) => setNewPersonComment(e.target.value)} style={{ resize: 'vertical' }} />
-                  <p className="text-muted" style={{ fontSize: '0.72rem', marginTop: '6px' }}>
-                    Starts the comment thread. You and other leaders can add more notes during the trial.
-                  </p>
-                </div>
-              )}
             </div>
           )}
         </div>

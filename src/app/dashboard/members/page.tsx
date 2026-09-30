@@ -9,14 +9,13 @@ import MemberCard from '@/components/members/MemberCard';
 import UnlinkedAccountsPanel from '@/components/members/UnlinkedAccountsPanel';
 import LinkAccountModal from '@/components/members/LinkAccountModal';
 
-type FilterType = 'all' | 'babies' | 'permanent' | 'discord_unlinked';
+type FilterType = 'all' | 'discord_unlinked';
 
 export default function MembersPage() {
   const { selectedClanId } = useClan();
 
   const members = useMembersStore((s) => s.members);
   const unlinkedAccounts = useMembersStore((s) => s.unlinkedAccounts);
-  const babyTrialDays = useMembersStore((s) => s.babyTrialDays);
   const loading = useMembersStore((s) => s.loading);
   const toast = useMembersStore((s) => s.toast);
   const setToast = useMembersStore((s) => s.setToast);
@@ -32,25 +31,20 @@ export default function MembersPage() {
     fetchData(selectedClanId);
   }, [selectedClanId, fetchData]);
 
-  // Honour a ?filter=babies shortcut from the dashboard "Current Babies" stat card.
+  // Honour a ?filter= shortcut in the URL.
   useEffect(() => {
     const f = new URLSearchParams(window.location.search).get('filter');
-    if (f === 'babies' || f === 'permanent' || f === 'all' || f === 'discord_unlinked') setFilterType(f);
+    if (f === 'all' || f === 'discord_unlinked') setFilterType(f);
   }, []);
 
   const filteredMembers = members.filter((m) => {
     const matchesSearch =
       m.display_name.toLowerCase().includes(search.toLowerCase()) ||
       m.player_accounts.some((pa) => pa.in_game_name.toLowerCase().includes(search.toLowerCase()) || pa.player_tag.includes(search.toUpperCase()));
-    const matchesType =
-      filterType === 'all' ? true :
-      filterType === 'babies' ? m.is_baby :
-      filterType === 'discord_unlinked' ? !m.discord_user_id :
-      !m.is_baby;
+    const matchesType = filterType === 'all' || !m.discord_user_id;
     return matchesSearch && matchesType;
   });
 
-  const babyCount = members.filter((m) => m.is_baby).length;
   const discordUnlinkedCount = members.filter((m) => !m.discord_user_id).length;
 
   return (
@@ -68,8 +62,6 @@ export default function MembersPage() {
           </div>
           <select className="input filter-select" value={filterType} onChange={(e) => setFilterType(e.target.value as FilterType)} aria-label="Filter members by status">
             <option value="all">All Members</option>
-            <option value="babies">Babies{babyCount ? ` (${babyCount})` : ''}</option>
-            <option value="permanent">Permanent</option>
             <option value="discord_unlinked">Discord Unlinked{discordUnlinkedCount ? ` (${discordUnlinkedCount})` : ''}</option>
           </select>
         </div>
@@ -85,7 +77,7 @@ export default function MembersPage() {
             <p className="text-muted">No records match your filters.</p>
           </div>
         ) : (
-          filteredMembers.map((member) => <MemberCard key={member.id} member={member} babyTrialDays={babyTrialDays} />)
+          filteredMembers.map((member) => <MemberCard key={member.id} member={member} />)
         )}
       </div>
 

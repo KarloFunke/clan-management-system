@@ -25,8 +25,6 @@ export interface Person {
   id: string;
   display_name: string;
   notes: string | null;
-  is_baby: boolean;
-  baby_started_at: string | null;
   access_role: AccessRole | null; // dashboard permission; NULL = no access. Inherited by all linked accounts.
   discord_user_id: string | null; // for @-mentioning this member in Discord notifications; NULL = no mention
   created_at: string;
@@ -120,29 +118,6 @@ export interface Setting {
   value: any;
   description: string | null;
   updated_at: string;
-}
-
-export type OnboardingEventType =
-  | 'engagement_attempt'
-  | 'rules_passed'
-  | 'linked_accounts_checked'
-  | 'additional_account_registered'
-  | 'assigned_clan'
-  | 'invited_discord'
-  | 'joined_discord'
-  | 'discord_waived'      // member has no Discord — the invite/join steps are skipped, not pending
-  | 'promoted_elder';
-
-export interface OnboardingEvent {
-  id: string;
-  person_id: string;
-  event_type: OnboardingEventType;
-  actor_tag: string | null;
-  outcome: 'replied' | 'ignored' | null;
-  clan_id: string | null;
-  account_tag: string | null;
-  metadata: Record<string, any>;
-  created_at: string;
 }
 
 // ---- Regular (non-CWL) clan wars ----

@@ -7,16 +7,12 @@ export type AccountWithClan = PlayerAccount & { clan: Clan };
 export type PersonWithAccounts = Person & { player_accounts: AccountWithClan[] };
 
 // What the link modal collects. `personId` set = link to an existing person (alt link);
-// otherwise a new person is created from `newPersonName` (optionally as a baby + note).
+// otherwise a new person is created from `newPersonName`.
 export type LinkPayload = {
   playerTag: string;
   personId: string | null;
   newPersonName: string | null;
-  isBaby: boolean;
-  comment: string | null;
 };
-
-const DEFAULT_TRIAL_DAYS = 4;
 
 // Persons are listed alphabetically by display name, matching the server `.order('display_name')`.
 function sortMembers(members: PersonWithAccounts[]): PersonWithAccounts[] {
@@ -26,7 +22,6 @@ function sortMembers(members: PersonWithAccounts[]): PersonWithAccounts[] {
 type MembersState = {
   members: PersonWithAccounts[];
   unlinkedAccounts: AccountWithClan[];
-  babyTrialDays: number;
   loading: boolean;
   linking: boolean;
   toast: ToastState | null;
@@ -39,7 +34,6 @@ type MembersState = {
 export const useMembersStore = create<MembersState>((set) => ({
   members: [],
   unlinkedAccounts: [],
-  babyTrialDays: DEFAULT_TRIAL_DAYS,
   loading: true,
   linking: false,
   toast: null,
@@ -49,21 +43,6 @@ export const useMembersStore = create<MembersState>((set) => ({
   async fetchData(selectedClanId) {
     set({ loading: true });
     try {
-      // Sweep any babies whose trial window elapsed before we read the roster,
-      // so lapsed accounts show up as Unlinked rather than as stale members.
-      try {
-        await fetch('/api/babies/expire', { method: 'POST' });
-      } catch {}
-
-      // Load the configurable trial window for countdown display.
-      const { data: trialSetting } = await supabase
-        .from('settings')
-        .select('value')
-        .eq('key', 'baby_trial_days')
-        .single();
-      const parsedTrial = parseInt(String(trialSetting?.value ?? ''), 10);
-      const babyTrialDays = Number.isFinite(parsedTrial) && parsedTrial > 0 ? parsedTrial : DEFAULT_TRIAL_DAYS;
-
       // Persons with their linked accounts. The clan filter narrows the *person list* only
       // (a person appearing in the selected clan keeps all their alts on the card).
       const { data: personsData } = await supabase
@@ -88,7 +67,6 @@ export const useMembersStore = create<MembersState>((set) => ({
       set({
         members,
         unlinkedAccounts: (unlinkedData as AccountWithClan[]) || [],
-        babyTrialDays,
         loading: false,
       });
     } catch (err) {

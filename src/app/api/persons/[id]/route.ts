@@ -14,7 +14,7 @@ const DISCORD_ID_RE = /^\d{17,20}$/;
  * account so warning webhooks can @-mention them, or pass null/'' to unlink. This replaces the
  * `scripts/link-discord.mjs` backfill for one-off edits — leaders no longer touch the DB directly.
  *
- * Any active leader may set it (same bar as recording onboarding events — it's data entry, not a
+ * Any active leader may set it (same bar as adding a member note — it's data entry, not a
  * permission grant). One Discord id maps to at most one persona, so linking an id already held by a
  * DIFFERENT person is rejected (409) rather than silently split across two personas; alts share a
  * person, so re-linking the same id to the same person is a no-op success.
@@ -83,11 +83,10 @@ export async function PATCH(
  * Their linked accounts are DETACHED back to the Unlinked pool (player_accounts.person_id → NULL) —
  * this must happen before the delete since that FK has no ON DELETE rule, and it's the behaviour we
  * want: the in-game accounts survive, only the human record goes. Deleting the person then CASCADES
- * to their strikes, member notes and onboarding events (ON DELETE CASCADE), so this is irreversible.
+ * to their strikes and member notes (ON DELETE CASCADE), so this is irreversible.
  *
  * Gated on `leader.manage` (leaders + super_admin). Guardrail: a person who still holds dashboard
- * access can't be deleted — revoke their access first, mirroring the baby auto-sweep which never
- * removes an access-holder.
+ * access can't be deleted — revoke their access first.
  */
 export async function DELETE(
   request: NextRequest,
@@ -119,7 +118,7 @@ export async function DELETE(
       .eq('person_id', id);
     if (detachError) throw detachError;
 
-    // Cascades to strikes / member_notes / onboarding_events via their ON DELETE CASCADE FKs.
+    // Cascades to strikes / member_notes via their ON DELETE CASCADE FKs.
     const { error: deleteError } = await supabase.from('persons').delete().eq('id', id);
     if (deleteError) throw deleteError;
 

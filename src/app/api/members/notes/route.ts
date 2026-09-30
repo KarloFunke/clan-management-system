@@ -1,9 +1,9 @@
 import { NextResponse, NextRequest } from 'next/server';
 import { authorizeActive } from '@/lib/auth-server';
-import { addMemberNote } from '@/lib/babies';
+import { addMemberNote } from '@/lib/memberNotes';
 
 // POST: add a note to a member's thread. Attributed to the acting leader's player_tag.
-// Available for every member (baby-phase notes carry forward after promotion).
+// Available for every member.
 export async function POST(request: NextRequest) {
   try {
     const auth = await authorizeActive(request);

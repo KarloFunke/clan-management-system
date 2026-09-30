@@ -15,7 +15,7 @@ async function personIdForTag(tag: string): Promise<string | null> {
 // Load a note and enforce the modification rule shared by edit + delete: only the note's
 // AUTHOR PERSON may change it. Authorship is resolved at the person level, not the account
 // level, so any alt belonging to the same person as the original author can edit/delete it
-// too. Notes are editable for the lifetime of the member (no baby gate).
+// too. Notes are editable for the lifetime of the member.
 async function guardEditable(noteId: string, actorTag: string) {
   const { data: note } = await supabase
     .from('member_notes')

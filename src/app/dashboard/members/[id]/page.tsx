@@ -8,7 +8,6 @@ import { useMemberDossierStore } from '@/lib/stores/memberDossierStore';
 import ConfirmationModal from '@/components/ui/ConfirmationModal';
 import Toast from '@/components/ui/Toast';
 import PersonCard from '@/components/members/dossier/PersonCard';
-import OnboardingTimeline from '@/components/members/dossier/OnboardingTimeline';
 import MemberNotes from '@/components/members/dossier/MemberNotes';
 import StrikeHistory from '@/components/members/dossier/StrikeHistory';
 import ActivityHistory from '@/components/members/dossier/ActivityHistory';
@@ -24,7 +23,6 @@ export default function PersonProfilePage({ params }: { params: Promise<{ id: st
   const removing = useMemberDossierStore((s) => s.removing);
   const fetchPerson = useMemberDossierStore((s) => s.fetchPerson);
   const loadIdentity = useMemberDossierStore((s) => s.loadIdentity);
-  const loadFamilyClans = useMemberDossierStore((s) => s.loadFamilyClans);
   const removePlayer = useMemberDossierStore((s) => s.removePlayer);
   const unlinkPlayer = useMemberDossierStore((s) => s.unlinkPlayer);
   const deletingPerson = useMemberDossierStore((s) => s.deletingPerson);
@@ -46,8 +44,7 @@ export default function PersonProfilePage({ params }: { params: Promise<{ id: st
 
   useEffect(() => {
     loadIdentity();
-    loadFamilyClans();
-  }, [loadIdentity, loadFamilyClans]);
+  }, [loadIdentity]);
 
   async function handleConfirm() {
     const { mode, tag } = confirmConfig;
@@ -85,7 +82,7 @@ export default function PersonProfilePage({ params }: { params: Promise<{ id: st
                 mode: 'person',
                 tag: '',
                 title: 'Delete Person',
-                message: `Permanently delete ${person.display_name}? Their ${person.player_accounts.length} account${person.player_accounts.length === 1 ? '' : 's'} return to the Unlinked pool, and all strikes, notes and onboarding history are erased. This cannot be undone.`,
+                message: `Permanently delete ${person.display_name}? Their ${person.player_accounts.length} account${person.player_accounts.length === 1 ? '' : 's'} return to the Unlinked pool, and all strikes and notes are erased. This cannot be undone.`,
               })
             }
           />
@@ -93,7 +90,6 @@ export default function PersonProfilePage({ params }: { params: Promise<{ id: st
 
         {/* Right Column: History */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-lg)' }}>
-          <OnboardingTimeline />
           <MemberNotes />
           <StrikeHistory />
           <ActivityHistory />

@@ -11,7 +11,7 @@ import { requireAuth, requireCapability, authErrorResponse, authorizeActive, has
  * But if this is the person's LAST account, the unlink collapses into a person deletion (their
  * profile would otherwise be an invisible, accountless orphan). That case is gated exactly like
  * DELETE /api/persons/:id — it needs `leader.manage`, refuses an access-holder — and cascades the
- * person's strikes / notes / onboarding history. This replaces a raw client-side supabase mutation
+ * person's strikes and notes. This replaces a raw client-side supabase mutation
  * that bypassed auth entirely.
  */
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ tag: string }> }) {
@@ -61,7 +61,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
           { status: 409 }
         );
       }
-      // Detach then delete (cascades strikes / notes / onboarding via ON DELETE CASCADE).
+      // Detach then delete (cascades strikes / notes via ON DELETE CASCADE).
       const { error: detachError } = await supabase
         .from('player_accounts')
         .update({ person_id: null })

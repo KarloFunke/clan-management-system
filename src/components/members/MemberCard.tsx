@@ -1,33 +1,22 @@
 'use client';
 
 import Link from 'next/link';
-import { User, ChevronRight, Baby, Clock } from 'lucide-react';
-import { babyDaysLeft } from '@/lib/babies';
+import { User, ChevronRight } from 'lucide-react';
 import type { PersonWithAccounts } from '@/lib/stores/membersStore';
 
-// One registry row: identity avatar, name + baby countdown, linked-account chips, and a
+// One registry row: identity avatar, name, linked-account chips, and a
 // link into the dossier. Purely presentational — all state lives in the store/page.
-export default function MemberCard({ member, babyTrialDays }: { member: PersonWithAccounts; babyTrialDays: number }) {
-  const daysLeft = member.is_baby ? babyDaysLeft(member.baby_started_at, babyTrialDays) : 0;
-
+export default function MemberCard({ member }: { member: PersonWithAccounts }) {
   return (
-    <div className="card" style={{ cursor: 'default', borderLeft: member.is_baby ? '3px solid var(--color-warning)' : undefined }}>
+    <div className="card" style={{ cursor: 'default' }}>
       <div className="member-card-content">
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-lg)' }}>
           <div style={{ width: '48px', height: '48px', borderRadius: 'var(--radius-md)', background: 'var(--color-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            {member.is_baby ? <Baby size={24} color="var(--color-warning)" /> : <User size={24} color="var(--color-muted)" />}
+            <User size={24} color="var(--color-muted)" />
           </div>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', marginBottom: '4px', flexWrap: 'wrap' }}>
               <h3 style={{ margin: 0 }}>{member.display_name}</h3>
-              {member.is_baby && (
-                <span className="baby-badge">
-                  <Baby size={12} /> BABY
-                  <span className="baby-badge-count">
-                    <Clock size={11} /> {daysLeft > 0 ? `${daysLeft}d left` : 'trial ended'}
-                  </span>
-                </span>
-              )}
             </div>
             <div style={{ display: 'flex', gap: 'var(--space-sm)', flexWrap: 'wrap' }}>
               {member.player_accounts.map((acc) => (

@@ -1,14 +1,13 @@
 'use client';
 
 import { useState } from 'react';
-import { MessageSquare, Baby, Send, Pencil, Trash2 } from 'lucide-react';
+import { MessageSquare, Send, Pencil, Trash2 } from 'lucide-react';
 import { useMemberDossierStore } from '@/lib/stores/memberDossierStore';
 
-// Member notes comment thread — available for every member; baby-phase notes carry forward.
+// Member notes comment thread — available for every member.
 // Draft/edit state stays local; the store owns the notes list and the mutations.
 export default function MemberNotes() {
   const notes = useMemberDossierStore((s) => s.person?.member_notes ?? []);
-  const isBaby = useMemberDossierStore((s) => s.person?.is_baby ?? false);
   const loggerNames = useMemberDossierStore((s) => s.loggerNames);
   const postingComment = useMemberDossierStore((s) => s.postingComment);
   const savingEdit = useMemberDossierStore((s) => s.savingEdit);
@@ -38,13 +37,8 @@ export default function MemberNotes() {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 'var(--space-sm)', marginBottom: 'var(--space-lg)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-md)' }}>
           <MessageSquare size={20} color="var(--color-cta)" />
-          <h2 style={{ fontSize: '1.2rem', margin: 0 }}>Notes (exceptional)</h2>
+          <h2 style={{ fontSize: '1.2rem', margin: 0 }}>Notes</h2>
         </div>
-        {isBaby && (
-          <span className="baby-badge">
-            <Baby size={11} /> Baby trial
-          </span>
-        )}
       </div>
 
       <div style={{ marginBottom: notes.length ? 'var(--space-lg)' : 0 }}>

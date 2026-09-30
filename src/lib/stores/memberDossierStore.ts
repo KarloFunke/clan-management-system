@@ -1,9 +1,9 @@
 /**
  * Zustand store for the Member Dossier screen (`/dashboard/members/[id]`).
  *
- * Why a store: the profile is a deep object (accounts + strikes + activity + notes + onboarding
- * events) that several sibling cards render. Previously every mutation on the page — post a note,
- * tick an onboarding step, save a Discord id — re-fetched the ENTIRE profile, which flashed the
+ * Why a store: the profile is a deep object (accounts + strikes + activity + notes) that several
+ * sibling cards render. Previously every mutation on the page — post a note, save a Discord id —
+ * re-fetched the ENTIRE profile, which flashed the
  * whole page. The store instead applies each mutation GRANULARLY (splice the changed slice of
  * `person` in place) so only the affected card re-renders, and it owns the server truth that the
  * (otherwise deeply prop-drilled) dossier cards each read directly.
@@ -24,8 +24,6 @@ import type {
   Clan,
   Rule,
   MemberNote,
-  OnboardingEvent,
-  OnboardingEventType,
 } from '@/types/database';
 import type { Capability } from '@/lib/permissions';
 import type { ToastState } from '@/components/ui/Toast';
@@ -35,7 +33,6 @@ export type FullPerson = Person & {
   strikes: (Strike & { rule: Rule | null; strike_violations: StrikeViolation[] })[];
   activity_logs: LeadershipLog[];
   member_notes: MemberNote[];
-  onboarding_events: OnboardingEvent[];
 };
 
 // Result of a destructive account action, so the component can route away when the persona
@@ -48,8 +45,6 @@ type DossierState = {
   loggerNames: Record<string, string>;
   // author player_tag -> person_id, so alts of an author inherit that author's edit/delete controls.
   authorPersons: Record<string, string | null>;
-  babyTrialDays: number;
-  familyClans: Clan[];
   currentUserTag: string | null;
   currentUserName: string | null;
   myPersonId: string | null;
@@ -59,8 +54,6 @@ type DossierState = {
   toast: ToastState | null;
 
   // Per-action in-flight guards (each card shows its own saving state, not the whole page).
-  recordingEvent: boolean;
-  deletingEvent: boolean;
   removing: boolean;
   deletingPerson: boolean;
   postingComment: boolean;
@@ -70,13 +63,7 @@ type DossierState = {
 
   setToast: (toast: ToastState | null) => void;
   loadIdentity: () => Promise<void>;
-  loadFamilyClans: () => Promise<void>;
   fetchPerson: (id: string) => Promise<void>;
-  recordOnboardingEvent: (
-    eventType: OnboardingEventType,
-    opts?: { outcome?: 'replied' | 'ignored'; clanId?: string },
-  ) => Promise<void>;
-  deleteOnboardingEvent: (eventId: string) => Promise<void>;
   saveDiscordId: (value: string) => Promise<boolean>;
   addComment: (body: string) => Promise<boolean>;
   saveCommentEdit: (commentId: string, body: string) => Promise<boolean>;
@@ -100,16 +87,12 @@ export const useMemberDossierStore = create<DossierState>((set, get) => ({
   person: null,
   loggerNames: {},
   authorPersons: {},
-  babyTrialDays: 4,
-  familyClans: [],
   currentUserTag: null,
   currentUserName: null,
   myPersonId: null,
   myCapabilities: [],
   loading: true,
   toast: null,
-  recordingEvent: false,
-  deletingEvent: false,
   removing: false,
   deletingPerson: false,
   postingComment: false,
@@ -138,16 +121,6 @@ export const useMemberDossierStore = create<DossierState>((set, get) => ({
     }
   },
 
-  async loadFamilyClans() {
-    // Family clans populate the onboarding clan-assignment dropdown (no hardcoded clans).
-    const { data } = await supabase
-      .from('clans')
-      .select('*')
-      .eq('active', true)
-      .order('display_order');
-    set({ familyClans: (data as Clan[]) || [] });
-  },
-
   async fetchPerson(id) {
     set({ loading: true, personId: id });
     try {
@@ -166,8 +139,7 @@ export const useMemberDossierStore = create<DossierState>((set, get) => ({
             strike_violations (*)
           ),
           activity_logs:leadership_logs (*),
-          member_notes (*),
-          onboarding_events (*)
+          member_notes (*)
         `,
         )
         .eq('id', id)
@@ -177,21 +149,12 @@ export const useMemberDossierStore = create<DossierState>((set, get) => ({
       const person = pData as FullPerson;
       set({ person });
 
-      const { data: trialSetting } = await supabase
-        .from('settings')
-        .select('value')
-        .eq('key', 'baby_trial_days')
-        .single();
-      const parsedTrial = parseInt(String(trialSetting?.value ?? ''), 10);
-      if (Number.isFinite(parsedTrial) && parsedTrial > 0) set({ babyTrialDays: parsedTrial });
-
-      // Resolve player_tags (strike loggers + note authors + event actors) to display names.
+      // Resolve player_tags (strike loggers + note authors) to display names.
       const loggerTags = Array.from(
         new Set(
           [
             ...(person?.strikes || []).map((s) => s.logged_by),
             ...(person?.member_notes || []).map((c) => c.author_tag),
-            ...(person?.onboarding_events || []).map((e) => e.actor_tag),
           ].filter(Boolean) as string[],
         ),
       );
@@ -212,70 +175,6 @@ export const useMemberDossierStore = create<DossierState>((set, get) => ({
       console.error('Error fetching person:', err);
     } finally {
       set({ loading: false });
-    }
-  },
-
-  async recordOnboardingEvent(eventType, opts) {
-    const { recordingEvent, personId, currentUserTag } = get();
-    if (recordingEvent || !personId) return;
-    set({ recordingEvent: true });
-    // Optimistic: show the event immediately, persist in the background, reconcile on response.
-    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const optimistic: OnboardingEvent = {
-      id: tempId,
-      person_id: personId,
-      event_type: eventType,
-      actor_tag: currentUserTag,
-      outcome: opts?.outcome ?? null,
-      clan_id: opts?.clanId ?? null,
-      account_tag: null,
-      metadata: {},
-      created_at: new Date().toISOString(),
-    };
-    patchPerson(set, (p) => ({ ...p, onboarding_events: [...(p.onboarding_events || []), optimistic] }));
-    try {
-      const res = await fetch(`/api/onboarding/${personId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ eventType, outcome: opts?.outcome, clanId: opts?.clanId }),
-      });
-      if (!res.ok) throw new Error((await res.json()).error || 'Failed to record action');
-      const saved = await res.json();
-      patchPerson(set, (p) => ({
-        ...p,
-        onboarding_events: (p.onboarding_events || []).map((e) => (e.id === tempId ? saved : e)),
-      }));
-    } catch (err: any) {
-      patchPerson(set, (p) => ({
-        ...p,
-        onboarding_events: (p.onboarding_events || []).filter((e) => e.id !== tempId),
-      }));
-      set({ toast: { type: 'error', message: err.message || 'Error recording action' } });
-    } finally {
-      set({ recordingEvent: false });
-    }
-  },
-
-  async deleteOnboardingEvent(eventId) {
-    const { deletingEvent, personId } = get();
-    if (deletingEvent || !personId) return;
-    set({ deletingEvent: true });
-    // Optimistic removal with revert on failure. Temp (unsaved) rows aren't deletable.
-    let removed: OnboardingEvent | undefined;
-    patchPerson(set, (p) => {
-      removed = (p.onboarding_events || []).find((e) => e.id === eventId);
-      return { ...p, onboarding_events: (p.onboarding_events || []).filter((e) => e.id !== eventId) };
-    });
-    try {
-      const res = await fetch(`/api/onboarding/${personId}?eventId=${encodeURIComponent(eventId)}`, {
-        method: 'DELETE',
-      });
-      if (!res.ok) throw new Error((await res.json()).error || 'Failed to remove action');
-    } catch (err: any) {
-      if (removed) patchPerson(set, (p) => ({ ...p, onboarding_events: [...(p.onboarding_events || []), removed!] }));
-      set({ toast: { type: 'error', message: err.message || 'Error removing action' } });
-    } finally {
-      set({ deletingEvent: false });
     }
   },
 
@@ -427,7 +326,7 @@ export const useMemberDossierStore = create<DossierState>((set, get) => ({
   },
 
   // Delete the whole person: their accounts return to the Unlinked pool and the person + all their
-  // strikes, notes and onboarding history are permanently removed (cascade in the API). Always
+  // strikes and notes are permanently removed (cascade in the API). Always
   // navigates away — the profile no longer exists.
   async deletePerson() {
     const { deletingPerson, personId } = get();

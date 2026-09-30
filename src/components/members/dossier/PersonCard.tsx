@@ -1,11 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { User, Baby, Clock, AtSign, CheckCircle, Link as LinkIcon, Trash2, AlertTriangle } from 'lucide-react';
+import { User, AtSign, CheckCircle, Link as LinkIcon, Trash2, AlertTriangle } from 'lucide-react';
 import { useMemberDossierStore } from '@/lib/stores/memberDossierStore';
-import { babyDaysLeft } from '@/lib/babies';
 
-// Left column of the dossier: identity, baby badge, Discord-link editor, and linked accounts.
+// Left column of the dossier: identity, Discord-link editor, and linked accounts.
 // Destructive actions are delegated up (the confirm modal and any navigation live in the page).
 export default function PersonCard({
   onRequestRemove,
@@ -17,7 +16,6 @@ export default function PersonCard({
   onRequestDeletePerson: () => void;
 }) {
   const person = useMemberDossierStore((s) => s.person);
-  const babyTrialDays = useMemberDossierStore((s) => s.babyTrialDays);
   const savingDiscord = useMemberDossierStore((s) => s.savingDiscord);
   const saveDiscordId = useMemberDossierStore((s) => s.saveDiscordId);
   const myCapabilities = useMemberDossierStore((s) => s.myCapabilities);
@@ -47,20 +45,6 @@ export default function PersonCard({
           <p className="text-muted" style={{ fontSize: '0.8rem' }}>Member since {new Date(person.created_at).toLocaleDateString()}</p>
         </div>
       </div>
-
-      {person.is_baby && (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 'var(--space-md)', padding: 'var(--space-md)', marginBottom: 'var(--space-lg)', background: 'rgba(245, 158, 11, 0.08)', border: '1px solid rgba(245, 158, 11, 0.25)', borderRadius: 'var(--radius-md)' }}>
-          <span className="baby-badge">
-            <Baby size={12} /> BABY
-            <span className="baby-badge-count">
-              <Clock size={11} /> {(() => { const d = babyDaysLeft(person.baby_started_at, babyTrialDays); return d > 0 ? `${d}d left` : 'trial ended'; })()}
-            </span>
-          </span>
-          <span className="text-muted" style={{ fontSize: '0.7rem', textAlign: 'right' }}>
-            Promotion is automatic on in-game Elder promotion
-          </span>
-        </div>
-      )}
 
       <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: 'var(--space-lg)', marginBottom: 'var(--space-lg)' }}>
         <h3 style={{ fontSize: '0.9rem', marginBottom: 'var(--space-md)', display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
@@ -141,7 +125,7 @@ export default function PersonCard({
         ) : (
           <>
             <p className="text-muted" style={{ fontSize: '0.78rem', margin: '0 0 var(--space-md)' }}>
-              Deletes this person. Their {person.player_accounts.length} linked account{person.player_accounts.length === 1 ? '' : 's'} return to the Unlinked pool; all strikes, notes and onboarding history are permanently erased. This cannot be undone.
+              Deletes this person. Their {person.player_accounts.length} linked account{person.player_accounts.length === 1 ? '' : 's'} return to the Unlinked pool; all strikes and notes are permanently erased. This cannot be undone.
             </p>
             <button
               onClick={onRequestDeletePerson}

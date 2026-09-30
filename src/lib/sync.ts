@@ -1,8 +1,6 @@
 import { supabase } from './supabase';
 import { fetchFromCoC, CoCClan } from './coc-api';
 import { PlayerAccount, DatabaseRole } from '@/types/database';
-import { promoteBaby, logBabyAction, recruiterTagForPerson, expireDepartedBabies } from './babies';
-import { addOnboardingEvent } from './onboarding';
 import { syncCwlLiveState } from './cwl/live';
 import { detectCompletedTransfers } from './cwl/roster';
 import { syncWarState } from './war';
@@ -23,6 +21,7 @@ export async function syncClan(clanId: string) {
     // 2. Fetch latest roster from CoC API
     const cocClan = await fetchFromCoC<CoCClan>(`/clans/${encodeURIComponent(clan.clan_tag)}`);
     const cocMembers = cocClan.memberList;
+    if (!Array.isArray(cocMembers)) throw new Error(`CoC returned no member list for ${clan.clan_tag}`);
 
     // 3. Get current roster from DB
     const { data: dbAccounts, error: dbError } = await supabase
@@ -32,6 +31,13 @@ export async function syncClan(clanId: string) {
 
     if (dbError) throw new Error('Failed to fetch DB accounts');
 
+    // A clan with zero members does not exist in game (it is disbanded), so an empty list for a clan
+    // we hold active members of is a bad read, not a mass departure. Applying it would mark the whole
+    // roster 'left' — and start their cleanup clocks.
+    if (cocMembers.length === 0 && dbAccounts.some((a) => a.status === 'active')) {
+      throw new Error(`Refusing to apply an empty roster for ${clan.clan_tag}`);
+    }
+
     const cocAccountTags = new Set(cocMembers.map(m => m.tag));
 
     // 3b. Resolve existing account records GLOBALLY by player_tag.
@@ -39,24 +45,21 @@ export async function syncClan(clanId: string) {
     // so a player who moves between family clans — or rejoins after leaving — keeps the SAME row.
     // Looking these up only within the current clan would miss those rows and treat the player as
     // brand new, wiping their persona link (person_id), db_role, and access. Look up by tag instead.
+    //
+    // This read's error MUST abort the sync. On 2026-09-14 it failed without being checked, every
+    // member looked brand new, and the upsert below wrote person_id = NULL over each clan's whole
+    // roster — orphaning nearly every person in the registry.
     const cocMemberTags = cocMembers.map(m => m.tag);
-    const { data: globalAccounts } = cocMemberTags.length
+    const { data: globalAccounts, error: globalError } = cocMemberTags.length
       ? await supabase.from('player_accounts').select('*').in('player_tag', cocMemberTags)
-      : { data: [] as PlayerAccount[] };
+      : { data: [] as PlayerAccount[], error: null };
+    if (globalError) throw new Error(`Failed to look up existing accounts: ${globalError.message}`);
     const existingByTag = new Map((globalAccounts || []).map(a => [a.player_tag, a]));
 
     // 4. Update or Insert accounts
     const upsertData = [];
+    const newAccounts: { player_tag: string; clan_id: string; person_id: null; added_at: string; status: 'active' }[] = [];
     const now = new Date().toISOString();
-
-    // Babies auto-graduate once their in-game rank is elder or higher. We capture the (person_id,
-    // clan) for every LINKED account currently reading elder+ in game, then keep only those whose
-    // person is still flagged is_baby (checked AFTER the upsert). This is STATE-based, not
-    // transition-based: an earlier version only fired on the single sync where db_role flipped
-    // member->elder, so a baby who was already elder when linked (or whose flip sync was missed)
-    // stayed a baby forever. Permanent members are naturally excluded by the post-upsert is_baby
-    // filter (and re-promotion is a no-op since promoteBaby clears is_baby).
-    const promotionCandidates: { personId: string; clanId: string }[] = [];
 
     for (const member of cocMembers) {
       const existing = existingByTag.get(member.tag);
@@ -67,19 +70,17 @@ export async function syncClan(clanId: string) {
       else if (member.role === 'coLeader') role = 'co_leader';
       else if (member.role === 'admin') role = 'elder';
 
-      // Auto-promotion signal: any linked account currently at elder+ in game. The is_baby filter
-      // after the upsert decides who actually graduates (permanent elders are ignored there), so we
-      // don't gate on the prior db_role — that missed babies who were already elder before linking.
-      if (
-        existing?.person_id &&
-        (role === 'elder' || role === 'co_leader' || role === 'leader')
-      ) {
-        promotionCandidates.push({ personId: existing.person_id, clanId });
+      if (!existing) {
+        newAccounts.push({ player_tag: member.tag, clan_id: clanId, person_id: null, added_at: now, status: 'active' });
       }
 
       // db_role is a PURE clan-status mirror now — write the live in-game rank unconditionally.
       // Dashboard permission lives on persons.access_role and is untouched by sync, so there is no
       // longer any role to "protect" here (this replaces the old Role Protection Rule).
+      //
+      // person_id and added_at are deliberately NOT in this payload. Sync mirrors the game; the
+      // person link is a leader's decision and sync has no business writing it — not even "back" to
+      // the value it just read, since a stale or empty read would then clobber the real one.
       upsertData.push({
         player_tag: member.tag,
         clan_id: clanId,
@@ -96,9 +97,6 @@ export async function syncClan(clanId: string) {
         db_role: role,
         status: 'active',
         last_synced_at: now,
-        // Keep existing person_id if present
-        person_id: existing?.person_id || null,
-        added_at: existing?.added_at || now,
       });
     }
 
@@ -108,50 +106,21 @@ export async function syncClan(clanId: string) {
       .map(a => a.player_tag);
 
     // 6. Execute Updates
+    // New accounts first, as insert-if-absent: if the lookup above somehow missed a row that does
+    // exist, ignoreDuplicates leaves it untouched instead of resetting its link and added_at.
+    if (newAccounts.length > 0) {
+      const { error: insertError } = await supabase
+        .from('player_accounts')
+        .upsert(newAccounts, { onConflict: 'player_tag', ignoreDuplicates: true });
+      if (insertError) throw insertError;
+    }
+
     if (upsertData.length > 0) {
       const { error: upsertError } = await supabase
         .from('player_accounts')
         .upsert(upsertData);
       
       if (upsertError) throw upsertError;
-    }
-
-    // 6b. Auto-promote babies whose in-game role climbed to elder+. Only persons still flagged
-    // is_baby are graduated; permanent members are untouched even if their CoC role reads member.
-    // Non-fatal: a promotion-logging failure must never break the sync itself.
-    if (promotionCandidates.length > 0) {
-      try {
-        const uniqueByPerson = new Map(promotionCandidates.map((c) => [c.personId, c]));
-        const candidateIds = Array.from(uniqueByPerson.keys());
-        const { data: babies } = await supabase
-          .from('persons')
-          .select('id')
-          .in('id', candidateIds)
-          .eq('is_baby', true);
-
-        for (const baby of babies || []) {
-          const { clanId: cId } = uniqueByPerson.get(baby.id)!;
-          await promoteBaby(baby.id);
-          // System-recorded graduation (the CoC API never reveals who promoted in-game).
-          await addOnboardingEvent({
-            personId: baby.id,
-            eventType: 'promoted_elder',
-            actorTag: null,
-            clanId: cId,
-            metadata: { source: 'sync' },
-          });
-          // Credit the ORIGINAL recruiter for the successful onboarding ("Babies Made").
-          await logBabyAction({
-            loggedBy: await recruiterTagForPerson(baby.id),
-            category: 'promotion',
-            personId: baby.id,
-            clanId: cId,
-            description: 'Auto-promoted to Elder (in-game promotion detected)',
-          });
-        }
-      } catch (promoErr) {
-        console.error('Auto-promotion during sync failed:', promoErr);
-      }
     }
 
     if (leftTags.length > 0) {
@@ -286,7 +255,7 @@ async function safeScanViolations() {
 /**
  * The full sync flow, shared by the cookie-auth route (`/api/sync`) and the machine-auth cron
  * route (`/api/cron/sync`) so both run identical logic. Pass a `clanId` to sync one clan, or omit
- * it to reconcile every active clan, expire departed babies, and refresh CWL. Auth is the caller's
+ * it to reconcile every active clan and refresh CWL. Auth is the caller's
  * responsibility — this function performs no authorization.
  */
 export async function runFullSync(clanId?: string) {
@@ -304,10 +273,6 @@ export async function runFullSync(clanId?: string) {
 
   const results = await Promise.all(clans.map(c => syncClan(c.id)));
 
-  // Every active clan is now reconciled in this single pass, so a baby with no active account
-  // anywhere has genuinely left the family (not just moved between clans). Drop those personas
-  // immediately rather than waiting out the trial.
-  const { expired: departedBabies } = await expireDepartedBabies();
   const transfers = await safeDetectTransfers();
   const cwl = await safeCwlSync();
   const war = await safeWarSync();
@@ -317,7 +282,6 @@ export async function runFullSync(clanId?: string) {
     success: true,
     clansSynced: results.length,
     totalUpdated: results.reduce((acc, r) => acc + r.count, 0),
-    departedBabies,
     transfers,
     cwl,
     war,
